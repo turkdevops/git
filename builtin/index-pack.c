@@ -62,6 +62,8 @@ struct base_data {
  * Stack of struct base_data that have unprocessed children.
  * threaded_second_pass() uses this as a source of work (the other being the
  * objects array).
+ *
+ * Guarded by work_mutex.
  */
 LIST_HEAD(work_head);
 
@@ -70,11 +72,16 @@ LIST_HEAD(work_head);
  * processed or are being processed, and at least one child is being processed.
  * These struct base_data must be kept around until the last child is
  * processed.
+ *
+ * Guarded by work_mutex.
  */
 LIST_HEAD(done_head);
 
 /*
  * All threads share one delta base cache.
+ *
+ * base_cache_used is guarded by work_mutex, and base_cache_limit is read-only
+ * in a thread.
  */
 size_t base_cache_used;
 size_t base_cache_limit;
