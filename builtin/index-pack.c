@@ -65,7 +65,7 @@ struct base_data {
  *
  * Guarded by work_mutex.
  */
-LIST_HEAD(work_head);
+static LIST_HEAD(work_head);
 
 /*
  * Stack of struct base_data that have children, all of whom have been
@@ -75,7 +75,7 @@ LIST_HEAD(work_head);
  *
  * Guarded by work_mutex.
  */
-LIST_HEAD(done_head);
+static LIST_HEAD(done_head);
 
 /*
  * All threads share one delta base cache.
@@ -83,8 +83,8 @@ LIST_HEAD(done_head);
  * base_cache_used is guarded by work_mutex, and base_cache_limit is read-only
  * in a thread.
  */
-size_t base_cache_used;
-size_t base_cache_limit;
+static size_t base_cache_used;
+static size_t base_cache_limit;
 
 struct thread_local {
 	pthread_t thread;
