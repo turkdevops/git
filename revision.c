@@ -2345,6 +2345,12 @@ static int handle_revision_opt(struct rev_info *revs, int argc, const char **arg
 		revs->diffopt.flags.tree_in_recursive = 1;
 	} else if (!strcmp(arg, "-m")) {
 		revs->ignore_merges = 0;
+		/*
+		 * Backward compatibility wart - "diff-index -m" does
+		 * not mean "do not ignore merges", but "match_missing",
+		 * so set separate flag for it.
+		 */
+		revs->diff_index_match_missing = 1;
 	} else if ((argcount = parse_long_opt("diff-merges", argv, &optarg))) {
 		if (!strcmp(optarg, "off")) {
 			revs->ignore_merges = 1;
