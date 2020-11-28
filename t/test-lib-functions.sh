@@ -423,7 +423,7 @@ write_script () {
 # - Explicitly using test_have_prereq.
 #
 # - Implicitly by specifying the prerequisite tag in the calls to
-#   test_expect_{success,failure,code}.
+#   test_expect_{success,failure} and test_external{,_without_stderr}.
 #
 # The single parameter is the prerequisite tag (a simple word, in all
 # capital letters by convention).
@@ -474,15 +474,15 @@ test_lazy_prereq () {
 
 test_run_lazy_prereq_ () {
 	script='
-mkdir -p "$TRASH_DIRECTORY/prereq-test-dir" &&
+mkdir -p "$TRASH_DIRECTORY/prereq-test-dir-'"$1"'" &&
 (
-	cd "$TRASH_DIRECTORY/prereq-test-dir" &&'"$2"'
+	cd "$TRASH_DIRECTORY/prereq-test-dir-'"$1"'" &&'"$2"'
 )'
 	say >&3 "checking prerequisite: $1"
 	say >&3 "$script"
 	test_eval_ "$script"
 	eval_ret=$?
-	rm -rf "$TRASH_DIRECTORY/prereq-test-dir"
+	rm -rf "$TRASH_DIRECTORY/prereq-test-dir-$1"
 	if test "$eval_ret" = 0; then
 		say >&3 "prerequisite $1 ok"
 	else
@@ -783,6 +783,10 @@ test_line_count () {
 	fi
 }
 
+test_file_size () {
+	test-tool path-utils file-size "$1"
+}
+
 # Returns success if a comma separated string of keywords ($1) contains a
 # given keyword ($2).
 # Examples:
@@ -952,13 +956,7 @@ test_expect_code () {
 # - not all diff versions understand "-u"
 
 test_cmp() {
-	test $# -eq 2 || BUG "test_cmp requires two arguments"
-	if ! eval "$GIT_TEST_CMP" '"$@"'
-	then
-		test "x$1" = x- || test -e "$1" || BUG "test_cmp '$1' missing"
-		test "x$2" = x- || test -e "$2" || BUG "test_cmp '$2' missing"
-		return 1
-	fi
+	eval "$GIT_TEST_CMP" '"$@"'
 }
 
 # Check that the given config key has the expected value.
@@ -987,13 +985,7 @@ test_cmp_config() {
 # test_cmp_bin - helper to compare binary files
 
 test_cmp_bin() {
-	test $# -eq 2 || BUG "test_cmp_bin requires two arguments"
-	if ! cmp "$@"
-	then
-		test "x$1" = x- || test -e "$1" || BUG "test_cmp_bin '$1' missing"
-		test "x$2" = x- || test -e "$2" || BUG "test_cmp_bin '$2' missing"
-		return 1
-	fi
+	cmp "$@"
 }
 
 # Use this instead of test_cmp to compare files that contain expected and
