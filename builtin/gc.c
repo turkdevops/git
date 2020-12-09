@@ -534,7 +534,7 @@ int cmd_gc(int argc, const char **argv, const char *prefix)
 	const char *name;
 	pid_t pid;
 	int daemonized = 0;
-	int keep_base_pack = -1;
+	int keep_largest_pack = -1;
 	timestamp_t dummy;
 
 	struct option builtin_gc_options[] = {
@@ -548,7 +548,7 @@ int cmd_gc(int argc, const char **argv, const char *prefix)
 		OPT_BOOL_F(0, "force", &force,
 			   N_("force running gc even if there may be another gc running"),
 			   PARSE_OPT_NOCOMPLETE),
-		OPT_BOOL(0, "keep-largest-pack", &keep_base_pack,
+		OPT_BOOL(0, "keep-largest-pack", &keep_largest_pack,
 			 N_("repack all other packs except the largest pack")),
 		OPT_END()
 	};
@@ -625,8 +625,8 @@ int cmd_gc(int argc, const char **argv, const char *prefix)
 	} else {
 		struct string_list keep_pack = STRING_LIST_INIT_NODUP;
 
-		if (keep_base_pack != -1) {
-			if (keep_base_pack)
+		if (keep_largest_pack != -1) {
+			if (keep_largest_pack)
 				find_base_packs(&keep_pack, 0);
 		} else if (big_pack_threshold) {
 			find_base_packs(&keep_pack, big_pack_threshold);
@@ -1446,10 +1446,6 @@ static int maintenance_register(void)
 	struct child_process config_set = CHILD_PROCESS_INIT;
 	struct child_process config_get = CHILD_PROCESS_INIT;
 
-	/* There is no current repository, so skip registering it */
-	if (!the_repository || !the_repository->gitdir)
-		return 0;
-
 	/* Disable foreground maintenance */
 	git_config_set("maintenance.auto", "false");
 
@@ -1460,7 +1456,8 @@ static int maintenance_register(void)
 		git_config_set("maintenance.strategy", "incremental");
 
 	config_get.git_cmd = 1;
-	strvec_pushl(&config_get.args, "config", "--global", "--get", "maintenance.repo",
+	strvec_pushl(&config_get.args, "config", "--global", "--get",
+		     "--fixed-value", "maintenance.repo",
 		     the_repository->worktree ? the_repository->worktree
 					      : the_repository->gitdir,
 			 NULL);
@@ -1486,12 +1483,9 @@ static int maintenance_unregister(void)
 {
 	struct child_process config_unset = CHILD_PROCESS_INIT;
 
-	if (!the_repository || !the_repository->gitdir)
-		return error(_("no current repository to unregister"));
-
 	config_unset.git_cmd = 1;
 	strvec_pushl(&config_unset.args, "config", "--global", "--unset",
-		     "maintenance.repo",
+		     "--fixed-value", "maintenance.repo",
 		     the_repository->worktree ? the_repository->worktree
 					      : the_repository->gitdir,
 		     NULL);

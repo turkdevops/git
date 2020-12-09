@@ -78,6 +78,19 @@ UI, Workflows & Features
  * The command line completion script (in contrib/) learned to expand
    commands that are alias of alias.
 
+ * "git update-ref --stdin" learns to take multiple transactions in a
+   single session.
+
+ * Various subcommands of "git config" that takes value_regex
+   learn the "--literal-value" option to take the value_regex option
+   as a literal string.
+
+ * The transport layer was taught to optionally exchange the session
+   ID assigned by the trace2 subsystem during fetch/push transactions.
+
+ * "git imap-send" used to ignore configuration variables like
+   core.askpass; this has been corrected.
+
 
 Performance, Internal Implementation, Development Support etc.
 
@@ -127,6 +140,24 @@ Performance, Internal Implementation, Development Support etc.
 
  * A lazily defined test prerequisite can now be defined in terms of
    another lazily defined test prerequisite.
+
+ * Expectation for the original contributor after responding to a
+   review comment to use the explanation in a patch update has been
+   described.
+
+ * Multiple "credential-store" backends can race to lock the same
+   file, causing everybody else but one to fail---reattempt locking
+   with some timeout to reduce the rate of the failure.
+
+ * "git-parse-remote" shell script library outlived its usefulness.
+
+ * Like die() and error(), a call to warning() will also trigger a
+   trace2 event.
+
+ * Use of non-reentrant localtime() has been removed.
+
+ * Non-reentrant time-related library functions and ctime/asctime with
+   awkward calling interfaces are banned from the codebase.
 
 
 Fixes since v2.29
@@ -255,15 +286,57 @@ Fixes since v2.29
    larger than 4GB.
    (merge 81c4c5cf2e jk/4gb-idx later to maint).
 
- * "git fetch" did not work correctly with nested submodules where the
-   innermost submodule that is not of interest got updated in the
-   upstream, which has been corrected.
-   (merge 1b7ac4e6d4 pk/subsub-fetch-fix later to maint).
-
  * Since jgit does not yet work with SHA-256 repositories, mark the
    tests that uses it not to run unless we are testing with ShA-1
    repositories.
    (merge ea699b4adc sg/t5310-jgit-wants-sha1 later to maint).
+
+ * Config parser fix for "git notes".
+   (merge 45fef1599a na/notes-displayref-is-not-boolean later to maint).
+
+ * Move a definition of compatibility wrapper from cache.h to
+   git-compat-util.h
+   (merge a76b138daa hn/sleep-millisec-decl later to maint).
+
+ * Error message fix.
+   (merge eaf5341538 km/stash-error-message-fix later to maint).
+
+ * "git pull --rebase --recurse-submodules" checked for local changes
+   in a wrong range and failed to run correctly when it should.
+   (merge 5176f20ffe pb/pull-rebase-recurse-submodules later to maint).
+
+ * "git push" that is killed may leave a pack-objects process behind,
+   still computing to find a good compression, wasting cycles.  This
+   has been corrected.
+   (merge 8b59935114 jk/stop-pack-objects-when-push-is-killed later to maint).
+
+ * "git fetch" that is killed may leave a pack-objects process behind,
+   still computing to find a good compression, wasting cycles.  This
+   has been corrected.
+   (merge 309a4028e7 jk/stop-pack-objects-when-fetch-is-killed later to maint).
+
+ * "git add -i" failed to honor custom colors configured to show
+   patches, which has been corrected.
+   (merge 96386faa03 js/add-i-color-fix later to maint).
+
+ * Processes that access packdata while the .idx file gets removed
+   (e.g. while repacking) did not fail or fall back gracefully as they
+   could.
+   (merge 506ec2fbda tb/idx-midx-race-fix later to maint).
+
+ * "git apply" adjusted the permission bits of working-tree files and
+   directories according core.sharedRepository setting by mistake and
+   for a long time, which has been corrected.
+   (merge eb3c027e17 mt/do-not-use-scld-in-working-tree later to maint).
+
+ * "fetch-pack" could pass NULL pointer to unlink(2) when it sees an
+   invalid filename; the error checking has been tightened to make
+   this impossible.
+   (merge 6031af387e rs/fetch-pack-invalid-lockfile later to maint).
+
+ * "git maintenance run/start/stop" needed to be run in a repository
+   to hold the lockfile they use, but didn't make sure they are
+   actually in a repository, which has been corrected.
 
  * Other code cleanup, docfix, build fix, etc.
    (merge 3e0a5dc9af cc/doc-filter-branch-typofix later to maint).
@@ -286,3 +359,7 @@ Fixes since v2.29
    (merge 5a923bb1f0 ma/list-object-filter-opt-msgfix later to maint).
    (merge 1c3e412916 rs/archive-plug-leak-refname later to maint).
    (merge d44e5267ea rs/plug-diff-cache-leak later to maint).
+   (merge 793c1464d3 ab/gc-keep-base-option later to maint).
+   (merge b86339b12b mt/worktree-error-message-fix later to maint).
+   (merge e01ae2a4a7 js/pull-rebase-use-advise later to maint).
+   (merge e63d774242 sn/config-doc-typofix later to maint).
