@@ -156,7 +156,7 @@ static void upload_pack_data_clear(struct upload_pack_data *data)
 	string_list_clear(&data->deepen_not, 0);
 	object_array_clear(&data->extra_edge_obj);
 	list_objects_filter_release(&data->filter_options);
-	string_list_clear(&data->allowed_filters, 1);
+	string_list_clear(&data->allowed_filters, 0);
 
 	free((char *)data->pack_objects_hook);
 }
@@ -1324,12 +1324,13 @@ static int upload_pack_config(const char *var, const char *value, void *cb_data)
 	}
 
 	if (current_config_scope() != CONFIG_SCOPE_LOCAL &&
-	current_config_scope() != CONFIG_SCOPE_WORKTREE) {
+	    current_config_scope() != CONFIG_SCOPE_WORKTREE) {
 		if (!strcmp("uploadpack.packobjectshook", var))
 			return git_config_string(&data->pack_objects_hook, var, value);
 	}
 
-	parse_object_filter_config(var, value, data);
+	if (parse_object_filter_config(var, value, data) < 0)
+		return -1;
 
 	return parse_hide_refs_config(var, value, "uploadpack");
 }
