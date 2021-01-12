@@ -15,3 +15,5 @@ You can use e.g.
     $ git show --ext-diff whats-cooking.txt
 
 to review the history.
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/kadirselcuk/git.svg)](https://pkg.go.dev/github.com/kadirselcuk/git)
