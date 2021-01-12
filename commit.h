@@ -167,6 +167,8 @@ int find_commit_subject(const char *commit_buffer, const char **subject);
 
 struct commit_list *commit_list_insert(struct commit *item,
 					struct commit_list **list);
+int commit_list_contains(struct commit *item,
+			 struct commit_list *list);
 struct commit_list **commit_list_append(struct commit *commit,
 					struct commit_list **next);
 unsigned commit_list_count(const struct commit_list *l);
@@ -176,6 +178,9 @@ void commit_list_sort_by_date(struct commit_list **list);
 
 /* Shallow copy of the input list */
 struct commit_list *copy_commit_list(struct commit_list *list);
+
+/* Modify list in-place to reverse it, returning new head; list will be tail */
+struct commit_list *reverse_commit_list(struct commit_list *list);
 
 void free_commit_list(struct commit_list *list);
 
