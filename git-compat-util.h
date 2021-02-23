@@ -252,9 +252,9 @@ typedef unsigned long uintptr_t;
 #ifdef PRECOMPOSE_UNICODE
 #include "compat/precompose_utf8.h"
 #else
-static inline void precompose_argv(int argc, const char **argv)
+static inline const char *precompose_argv_prefix(int argc, const char **argv, const char *prefix)
 {
-	; /* nothing */
+	return prefix;
 }
 #define probe_utf8_pathname_composition()
 #endif
@@ -1176,9 +1176,12 @@ static inline int regexec_buf(const regex_t *preg, const char *buf, size_t size,
 #endif
 #endif
 
-#if defined(__GNUC__) || (_MSC_VER >= 1400) || defined(__C99_MACRO_WITH_VA_ARGS)
+/*
+ * This is always defined as a first step towards making the use of variadic
+ * macros unconditional. If it causes compilation problems on your platform,
+ * please report it to the Git mailing list at git@vger.kernel.org.
+ */
 #define HAVE_VARIADIC_MACROS 1
-#endif
 
 /* usage.c: only to be used for testing BUG() implementation (see test-tool) */
 extern int BUG_exit_code;

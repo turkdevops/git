@@ -1210,12 +1210,20 @@ static void grab_person(const char *who, struct atom_value *val, int deref, void
 }
 
 static void find_subpos(const char *buf,
-			const char **sub, unsigned long *sublen,
-			const char **body, unsigned long *bodylen,
-			unsigned long *nonsiglen,
-			const char **sig, unsigned long *siglen)
+			const char **sub, size_t *sublen,
+			const char **body, size_t *bodylen,
+			size_t *nonsiglen,
+			const char **sig, size_t *siglen)
 {
+	struct strbuf payload = STRBUF_INIT;
+	struct strbuf signature = STRBUF_INIT;
 	const char *eol;
+	const char *end = buf + strlen(buf);
+	const char *sigstart;
+
+	/* parse signature first; we might not even have a subject line */
+	parse_signature(buf, end - buf, &payload, &signature);
+
 	/* skip past header until we hit empty line */
 	while (*buf && *buf != '\n') {
 		eol = strchrnul(buf, '\n');
@@ -1226,16 +1234,14 @@ static void find_subpos(const char *buf,
 	/* skip any empty lines */
 	while (*buf == '\n')
 		buf++;
-
-	/* parse signature first; we might not even have a subject line */
-	*sig = buf + parse_signature(buf, strlen(buf));
-	*siglen = strlen(*sig);
+	*sig = strbuf_detach(&signature, siglen);
+	sigstart = buf + parse_signed_buffer(buf, strlen(buf));
 
 	/* subject is first non-empty line */
 	*sub = buf;
 	/* subject goes to first empty line before signature begins */
 	if ((eol = strstr(*sub, "\n\n"))) {
-		eol = eol < *sig ? eol : *sig;
+		eol = eol < sigstart ? eol : sigstart;
 	/* check if message uses CRLF */
 	} else if (! (eol = strstr(*sub, "\r\n\r\n"))) {
 		/* treat whole message as subject */
@@ -1253,7 +1259,7 @@ static void find_subpos(const char *buf,
 		buf++;
 	*body = buf;
 	*bodylen = strlen(buf);
-	*nonsiglen = *sig - buf;
+	*nonsiglen = sigstart - buf;
 }
 
 /*
@@ -1285,12 +1291,13 @@ static void grab_sub_body_contents(struct atom_value *val, int deref, void *buf)
 {
 	int i;
 	const char *subpos = NULL, *bodypos = NULL, *sigpos = NULL;
-	unsigned long sublen = 0, bodylen = 0, nonsiglen = 0, siglen = 0;
+	size_t sublen = 0, bodylen = 0, nonsiglen = 0, siglen = 0;
 
 	for (i = 0; i < used_atom_cnt; i++) {
 		struct used_atom *atom = &used_atom[i];
 		const char *name = atom->name;
 		struct atom_value *v = &val[i];
+
 		if (!!deref != (*name == '*'))
 			continue;
 		if (deref)
@@ -1322,7 +1329,7 @@ static void grab_sub_body_contents(struct atom_value *val, int deref, void *buf)
 			v->s = xmemdupz(sigpos, siglen);
 		else if (atom->u.contents.option == C_LINES) {
 			struct strbuf s = STRBUF_INIT;
-			const char *contents_end = bodylen + bodypos - siglen;
+			const char *contents_end = bodypos + nonsiglen;
 
 			/*  Size is the length of the message after removing the signature */
 			append_lines(&s, subpos, contents_end - subpos, atom->u.contents.nlines);
@@ -1336,7 +1343,9 @@ static void grab_sub_body_contents(struct atom_value *val, int deref, void *buf)
 			v->s = strbuf_detach(&s, NULL);
 		} else if (atom->u.contents.option == C_BARE)
 			v->s = xstrdup(subpos);
+
 	}
+	free((void *)sigpos);
 }
 
 /*
@@ -1536,36 +1545,27 @@ char *get_head_description(void)
 	struct wt_status_state state;
 	memset(&state, 0, sizeof(state));
 	wt_status_get_state(the_repository, &state, 1);
-
-	/*
-	 * The ( character must be hard-coded and not part of a localizable
-	 * string, since the description is used as a sort key and compared
-	 * with ref names.
-	 */
-	strbuf_addch(&desc, '(');
 	if (state.rebase_in_progress ||
 	    state.rebase_interactive_in_progress) {
 		if (state.branch)
-			strbuf_addf(&desc, _("no branch, rebasing %s"),
+			strbuf_addf(&desc, _("(no branch, rebasing %s)"),
 				    state.branch);
 		else
-			strbuf_addf(&desc, _("no branch, rebasing detached HEAD %s"),
+			strbuf_addf(&desc, _("(no branch, rebasing detached HEAD %s)"),
 				    state.detached_from);
 	} else if (state.bisect_in_progress)
-		strbuf_addf(&desc, _("no branch, bisect started on %s"),
+		strbuf_addf(&desc, _("(no branch, bisect started on %s)"),
 			    state.branch);
 	else if (state.detached_from) {
 		if (state.detached_at)
-			strbuf_addstr(&desc, HEAD_DETACHED_AT);
+			strbuf_addf(&desc, _("(HEAD detached at %s)"),
+				state.detached_from);
 		else
-			strbuf_addstr(&desc, HEAD_DETACHED_FROM);
-		strbuf_addstr(&desc, state.detached_from);
-	}
-	else
-		strbuf_addstr(&desc, _("no branch"));
-	strbuf_addch(&desc, ')');
+			strbuf_addf(&desc, _("(HEAD detached from %s)"),
+				state.detached_from);
+	} else
+		strbuf_addstr(&desc, _("(no branch)"));
 
-	wt_status_state_free_buffers(&state);
 	return strbuf_detach(&desc, NULL);
 }
 
@@ -1929,64 +1929,6 @@ static int filter_pattern_match(struct ref_filter *filter, const char *refname)
 	return match_pattern(filter, refname);
 }
 
-static int qsort_strcmp(const void *va, const void *vb)
-{
-	const char *a = *(const char **)va;
-	const char *b = *(const char **)vb;
-
-	return strcmp(a, b);
-}
-
-static void find_longest_prefixes_1(struct string_list *out,
-				  struct strbuf *prefix,
-				  const char **patterns, size_t nr)
-{
-	size_t i;
-
-	for (i = 0; i < nr; i++) {
-		char c = patterns[i][prefix->len];
-		if (!c || is_glob_special(c)) {
-			string_list_append(out, prefix->buf);
-			return;
-		}
-	}
-
-	i = 0;
-	while (i < nr) {
-		size_t end;
-
-		/*
-		* Set "end" to the index of the element _after_ the last one
-		* in our group.
-		*/
-		for (end = i + 1; end < nr; end++) {
-			if (patterns[i][prefix->len] != patterns[end][prefix->len])
-				break;
-		}
-
-		strbuf_addch(prefix, patterns[i][prefix->len]);
-		find_longest_prefixes_1(out, prefix, patterns + i, end - i);
-		strbuf_setlen(prefix, prefix->len - 1);
-
-		i = end;
-	}
-}
-
-static void find_longest_prefixes(struct string_list *out,
-				  const char **patterns)
-{
-	struct strvec sorted = STRVEC_INIT;
-	struct strbuf prefix = STRBUF_INIT;
-
-	strvec_pushv(&sorted, patterns);
-	QSORT(sorted.v, sorted.nr, qsort_strcmp);
-
-	find_longest_prefixes_1(out, &prefix, sorted.v, sorted.nr);
-
-	strvec_clear(&sorted);
-	strbuf_release(&prefix);
-}
-
 /*
  * This is the same as for_each_fullref_in(), but it tries to iterate
  * only over the patterns we'll care about. Note that it _doesn't_ do a full
@@ -1997,10 +1939,6 @@ static int for_each_fullref_in_pattern(struct ref_filter *filter,
 				       void *cb_data,
 				       int broken)
 {
-	struct string_list prefixes = STRING_LIST_INIT_DUP;
-	struct string_list_item *prefix;
-	int ret;
-
 	if (!filter->match_as_path) {
 		/*
 		 * in this case, the patterns are applied after
@@ -2024,16 +1962,8 @@ static int for_each_fullref_in_pattern(struct ref_filter *filter,
 		return for_each_fullref_in("", cb, cb_data, broken);
 	}
 
-	find_longest_prefixes(&prefixes, filter->name_patterns);
-
-	for_each_string_list_item(prefix, &prefixes) {
-		ret = for_each_fullref_in(prefix->string, cb, cb_data, broken);
-		if (ret)
-			break;
-	}
-
-	string_list_clear(&prefixes, 0);
-	return ret;
+	return for_each_fullref_in_prefixes(NULL, filter->name_patterns,
+					    cb, cb_data, broken);
 }
 
 /*
@@ -2350,12 +2280,24 @@ int filter_refs(struct ref_array *array, struct ref_filter *filter, unsigned int
 	return ret;
 }
 
+static int compare_detached_head(struct ref_array_item *a, struct ref_array_item *b)
+{
+	if (!(a->kind ^ b->kind))
+		BUG("ref_kind_from_refname() should only mark one ref as HEAD");
+	if (a->kind & FILTER_REFS_DETACHED_HEAD)
+		return -1;
+	else if (b->kind & FILTER_REFS_DETACHED_HEAD)
+		return 1;
+	BUG("should have died in the xor check above");
+	return 0;
+}
+
 static int cmp_ref_sorting(struct ref_sorting *s, struct ref_array_item *a, struct ref_array_item *b)
 {
 	struct atom_value *va, *vb;
 	int cmp;
+	int cmp_detached_head = 0;
 	cmp_type cmp_type = used_atom[s->atom].type;
-	int (*cmp_fn)(const char *, const char *);
 	struct strbuf err = STRBUF_INIT;
 
 	if (get_ref_atom_value(a, s->atom, &va, &err))
@@ -2363,12 +2305,18 @@ static int cmp_ref_sorting(struct ref_sorting *s, struct ref_array_item *a, stru
 	if (get_ref_atom_value(b, s->atom, &vb, &err))
 		die("%s", err.buf);
 	strbuf_release(&err);
-	cmp_fn = s->ignore_case ? strcasecmp : strcmp;
-	if (s->version)
+	if (s->sort_flags & REF_SORTING_DETACHED_HEAD_FIRST &&
+	    ((a->kind | b->kind) & FILTER_REFS_DETACHED_HEAD)) {
+		cmp = compare_detached_head(a, b);
+		cmp_detached_head = 1;
+	} else if (s->sort_flags & REF_SORTING_VERSION) {
 		cmp = versioncmp(va->s, vb->s);
-	else if (cmp_type == FIELD_STR)
+	} else if (cmp_type == FIELD_STR) {
+		int (*cmp_fn)(const char *, const char *);
+		cmp_fn = s->sort_flags & REF_SORTING_ICASE
+			? strcasecmp : strcmp;
 		cmp = cmp_fn(va->s, vb->s);
-	else {
+	} else {
 		if (va->value < vb->value)
 			cmp = -1;
 		else if (va->value == vb->value)
@@ -2377,7 +2325,8 @@ static int cmp_ref_sorting(struct ref_sorting *s, struct ref_array_item *a, stru
 			cmp = 1;
 	}
 
-	return (s->reverse) ? -cmp : cmp;
+	return (s->sort_flags & REF_SORTING_REVERSE && !cmp_detached_head)
+		? -cmp : cmp;
 }
 
 static int compare_refs(const void *a_, const void *b_, void *ref_sorting)
@@ -2392,15 +2341,20 @@ static int compare_refs(const void *a_, const void *b_, void *ref_sorting)
 			return cmp;
 	}
 	s = ref_sorting;
-	return s && s->ignore_case ?
+	return s && s->sort_flags & REF_SORTING_ICASE ?
 		strcasecmp(a->refname, b->refname) :
 		strcmp(a->refname, b->refname);
 }
 
-void ref_sorting_icase_all(struct ref_sorting *sorting, int flag)
+void ref_sorting_set_sort_flags_all(struct ref_sorting *sorting,
+				    unsigned int mask, int on)
 {
-	for (; sorting; sorting = sorting->next)
-		sorting->ignore_case = !!flag;
+	for (; sorting; sorting = sorting->next) {
+		if (on)
+			sorting->sort_flags |= mask;
+		else
+			sorting->sort_flags &= ~mask;
+	}
 }
 
 void ref_array_sort(struct ref_sorting *sorting, struct ref_array *array)
@@ -2537,12 +2491,12 @@ void parse_ref_sorting(struct ref_sorting **sorting_tail, const char *arg)
 	*sorting_tail = s;
 
 	if (*arg == '-') {
-		s->reverse = 1;
+		s->sort_flags |= REF_SORTING_REVERSE;
 		arg++;
 	}
 	if (skip_prefix(arg, "version:", &arg) ||
 	    skip_prefix(arg, "v:", &arg))
-		s->version = 1;
+		s->sort_flags |= REF_SORTING_VERSION;
 	s->atom = parse_sorting_atom(arg);
 }
 
