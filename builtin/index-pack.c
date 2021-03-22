@@ -185,7 +185,7 @@ static void init_thread(void)
 	if (show_stat)
 		pthread_mutex_init(&deepest_delta_mutex, NULL);
 	pthread_key_create(&key, NULL);
-	thread_data = xcalloc(nr_threads, sizeof(*thread_data));
+	CALLOC_ARRAY(thread_data, nr_threads);
 	for (i = 0; i < nr_threads; i++) {
 		thread_data[i].pack_fd = open(curr_pack, O_RDONLY);
 		if (thread_data[i].pack_fd == -1)
@@ -1674,7 +1674,7 @@ static void show_pack_info(int stat_only)
 	unsigned long *chain_histogram = NULL;
 
 	if (deepest_delta)
-		chain_histogram = xcalloc(deepest_delta, sizeof(unsigned long));
+		CALLOC_ARRAY(chain_histogram, deepest_delta);
 
 	for (i = 0; i < nr_objects; i++) {
 		struct object_entry *obj = &objects[i];
@@ -1710,6 +1710,22 @@ static void show_pack_info(int stat_only)
 			  i + 1,
 			  chain_histogram[i]);
 	}
+}
+
+static int print_dangling_gitmodules(struct fsck_options *o,
+				     const struct object_id *oid,
+				     enum object_type object_type,
+				     int msg_type, const char *message)
+{
+	/*
+	 * NEEDSWORK: Plumb the MSG_ID (from fsck.c) here and use it
+	 * instead of relying on this string check.
+	 */
+	if (starts_with(message, "gitmodulesMissing")) {
+		printf("%s\n", oid_to_hex(oid));
+		return 0;
+	}
+	return fsck_error_function(o, oid, object_type, msg_type, message);
 }
 
 int cmd_index_pack(int argc, const char **argv, const char *prefix)
@@ -1896,10 +1912,10 @@ int cmd_index_pack(int argc, const char **argv, const char *prefix)
 
 	curr_pack = open_pack_file(pack_name);
 	parse_pack_header();
-	objects = xcalloc(st_add(nr_objects, 1), sizeof(struct object_entry));
+	CALLOC_ARRAY(objects, st_add(nr_objects, 1));
 	if (show_stat)
-		obj_stat = xcalloc(st_add(nr_objects, 1), sizeof(struct object_stat));
-	ofs_deltas = xcalloc(nr_objects, sizeof(struct ofs_delta_entry));
+		CALLOC_ARRAY(obj_stat, st_add(nr_objects, 1));
+	CALLOC_ARRAY(ofs_deltas, nr_objects);
 	parse_pack_objects(pack_hash);
 	if (report_end_of_input)
 		write_in_full(2, "\0", 1);
@@ -1932,8 +1948,13 @@ int cmd_index_pack(int argc, const char **argv, const char *prefix)
 	else
 		close(input_fd);
 
-	if (do_fsck_object && fsck_finish(&fsck_options))
-		die(_("fsck error in pack objects"));
+	if (do_fsck_object) {
+		struct fsck_options fo = fsck_options;
+
+		fo.error_func = print_dangling_gitmodules;
+		if (fsck_finish(&fo))
+			die(_("fsck error in pack objects"));
+	}
 
 	free(objects);
 	strbuf_release(&index_name_buf);

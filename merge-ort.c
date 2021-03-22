@@ -351,17 +351,11 @@ static void clear_or_reinit_internal_opts(struct merge_options_internal *opti,
 
 	/* Free memory used by various renames maps */
 	for (i = MERGE_SIDE1; i <= MERGE_SIDE2; ++i) {
-		struct hashmap_iter iter;
-		struct strmap_entry *entry;
-
 		strset_func(&renames->dirs_removed[i]);
 
-		strmap_for_each_entry(&renames->dir_rename_count[i],
-				      &iter, entry) {
-			struct strintmap *counts = entry->value;
-			strintmap_clear(counts);
-		}
-		strmap_func(&renames->dir_rename_count[i], 1);
+		partial_clear_dir_rename_count(&renames->dir_rename_count[i]);
+		if (!reinitialize)
+			strmap_clear(&renames->dir_rename_count[i], 1);
 
 		strmap_func(&renames->dir_renames[i], 0);
 	}
@@ -535,6 +529,23 @@ static void setup_path_info(struct merge_options *opt,
 	result->util = mi;
 }
 
+static void add_pair(struct merge_options *opt,
+		     struct name_entry *names,
+		     const char *pathname,
+		     unsigned side,
+		     unsigned is_add /* if false, is_delete */)
+{
+	struct diff_filespec *one, *two;
+	struct rename_info *renames = &opt->priv->renames;
+	int names_idx = is_add ? side : 0;
+
+	one = alloc_filespec(pathname);
+	two = alloc_filespec(pathname);
+	fill_filespec(is_add ? two : one,
+		      &names[names_idx].oid, 1, names[names_idx].mode);
+	diff_queue(&renames->pairs[side], one, two);
+}
+
 static void collect_rename_info(struct merge_options *opt,
 				struct name_entry *names,
 				const char *dirname,
@@ -544,6 +555,7 @@ static void collect_rename_info(struct merge_options *opt,
 				unsigned match_mask)
 {
 	struct rename_info *renames = &opt->priv->renames;
+	unsigned side;
 
 	/* Update dirs_removed, as needed */
 	if (dirmask == 1 || dirmask == 3 || dirmask == 5) {
@@ -553,6 +565,21 @@ static void collect_rename_info(struct merge_options *opt,
 			strset_add(&renames->dirs_removed[1], fullname);
 		if (sides & 2)
 			strset_add(&renames->dirs_removed[2], fullname);
+	}
+
+	if (filemask == 0 || filemask == 7)
+		return;
+
+	for (side = MERGE_SIDE1; side <= MERGE_SIDE2; ++side) {
+		unsigned side_mask = (1 << side);
+
+		/* Check for deletion on side */
+		if ((filemask & 1) && !(filemask & side_mask))
+			add_pair(opt, names, fullname, side, 0 /* delete */);
+
+		/* Check for addition on side */
+		if (!(filemask & 1) && (filemask & side_mask))
+			add_pair(opt, names, fullname, side, 1 /* add */);
 	}
 }
 
@@ -1269,131 +1296,6 @@ static char *handle_path_level_conflicts(struct merge_options *opt,
 	return new_path;
 }
 
-static void dirname_munge(char *filename)
-{
-	char *slash = strrchr(filename, '/');
-	if (!slash)
-		slash = filename;
-	*slash = '\0';
-}
-
-static void increment_count(struct strmap *dir_rename_count,
-			    char *old_dir,
-			    char *new_dir)
-{
-	struct strintmap *counts;
-	struct strmap_entry *e;
-
-	/* Get the {new_dirs -> counts} mapping using old_dir */
-	e = strmap_get_entry(dir_rename_count, old_dir);
-	if (e) {
-		counts = e->value;
-	} else {
-		counts = xmalloc(sizeof(*counts));
-		strintmap_init_with_options(counts, 0, NULL, 1);
-		strmap_put(dir_rename_count, old_dir, counts);
-	}
-
-	/* Increment the count for new_dir */
-	strintmap_incr(counts, new_dir, 1);
-}
-
-static void update_dir_rename_counts(struct strmap *dir_rename_count,
-				     struct strset *dirs_removed,
-				     const char *oldname,
-				     const char *newname)
-{
-	char *old_dir = xstrdup(oldname);
-	char *new_dir = xstrdup(newname);
-	char new_dir_first_char = new_dir[0];
-	int first_time_in_loop = 1;
-
-	while (1) {
-		dirname_munge(old_dir);
-		dirname_munge(new_dir);
-
-		/*
-		 * When renaming
-		 *   "a/b/c/d/e/foo.c" -> "a/b/some/thing/else/e/foo.c"
-		 * then this suggests that both
-		 *   a/b/c/d/e/ => a/b/some/thing/else/e/
-		 *   a/b/c/d/   => a/b/some/thing/else/
-		 * so we want to increment counters for both.  We do NOT,
-		 * however, also want to suggest that there was the following
-		 * rename:
-		 *   a/b/c/ => a/b/some/thing/
-		 * so we need to quit at that point.
-		 *
-		 * Note the when first_time_in_loop, we only strip off the
-		 * basename, and we don't care if that's different.
-		 */
-		if (!first_time_in_loop) {
-			char *old_sub_dir = strchr(old_dir, '\0')+1;
-			char *new_sub_dir = strchr(new_dir, '\0')+1;
-			if (!*new_dir) {
-				/*
-				 * Special case when renaming to root directory,
-				 * i.e. when new_dir == "".  In this case, we had
-				 * something like
-				 *    a/b/subdir => subdir
-				 * and so dirname_munge() sets things up so that
-				 *    old_dir = "a/b\0subdir\0"
-				 *    new_dir = "\0ubdir\0"
-				 * We didn't have a '/' to overwrite a '\0' onto
-				 * in new_dir, so we have to compare differently.
-				 */
-				if (new_dir_first_char != old_sub_dir[0] ||
-				    strcmp(old_sub_dir+1, new_sub_dir))
-					break;
-			} else {
-				if (strcmp(old_sub_dir, new_sub_dir))
-					break;
-			}
-		}
-
-		if (strset_contains(dirs_removed, old_dir))
-			increment_count(dir_rename_count, old_dir, new_dir);
-		else
-			break;
-
-		/* If we hit toplevel directory ("") for old or new dir, quit */
-		if (!*old_dir || !*new_dir)
-			break;
-
-		first_time_in_loop = 0;
-	}
-
-	/* Free resources we don't need anymore */
-	free(old_dir);
-	free(new_dir);
-}
-
-static void compute_rename_counts(struct diff_queue_struct *pairs,
-				  struct strmap *dir_rename_count,
-				  struct strset *dirs_removed)
-{
-	int i;
-
-	for (i = 0; i < pairs->nr; ++i) {
-		struct diff_filepair *pair = pairs->queue[i];
-
-		/* File not part of directory rename if it wasn't renamed */
-		if (pair->status != 'R')
-			continue;
-
-		/*
-		 * Make dir_rename_count contain a map of a map:
-		 *   old_directory -> {new_directory -> count}
-		 * In other words, for every pair look at the directories for
-		 * the old filename and the new filename and count how many
-		 * times that pairing occurs.
-		 */
-		update_dir_rename_counts(dir_rename_count, dirs_removed,
-					 pair->one->path,
-					 pair->two->path);
-	}
-}
-
 static void get_provisional_directory_renames(struct merge_options *opt,
 					      unsigned side,
 					      int *clean)
@@ -1402,9 +1304,6 @@ static void get_provisional_directory_renames(struct merge_options *opt,
 	struct strmap_entry *entry;
 	struct rename_info *renames = &opt->priv->renames;
 
-	compute_rename_counts(&renames->pairs[side],
-			      &renames->dir_rename_count[side],
-			      &renames->dirs_removed[side]);
 	/*
 	 * Collapse
 	 *    dir_rename_count: old_directory -> {new_directory -> count}
@@ -1543,8 +1442,7 @@ static void compute_collisions(struct strmap *collisions,
 		if (collision_info) {
 			free(new_path);
 		} else {
-			collision_info = xcalloc(1,
-						 sizeof(struct collision_info));
+			CALLOC_ARRAY(collision_info, 1);
 			string_list_init(&collision_info->source_files, 0);
 			strmap_put(collisions, new_path, collision_info);
 		}
@@ -1685,7 +1583,7 @@ static void apply_directory_rename_modifications(struct merge_options *opt,
 		struct conflict_info *dir_ci;
 		char *cur_dir = dirs_to_insert.items[i].string;
 
-		dir_ci = xcalloc(1, sizeof(*dir_ci));
+		CALLOC_ARRAY(dir_ci, 1);
 
 		dir_ci->merged.directory_name = parent_name;
 		len = strlen(parent_name);
@@ -2079,6 +1977,27 @@ static int process_renames(struct merge_options *opt,
 	return clean_merge;
 }
 
+static void resolve_diffpair_statuses(struct diff_queue_struct *q)
+{
+	/*
+	 * A simplified version of diff_resolve_rename_copy(); would probably
+	 * just use that function but it's static...
+	 */
+	int i;
+	struct diff_filepair *p;
+
+	for (i = 0; i < q->nr; ++i) {
+		p = q->queue[i];
+		p->status = 0; /* undecided */
+		if (!DIFF_FILE_VALID(p->one))
+			p->status = DIFF_STATUS_ADDED;
+		else if (!DIFF_FILE_VALID(p->two))
+			p->status = DIFF_STATUS_DELETED;
+		else if (DIFF_PAIR_RENAME(p))
+			p->status = DIFF_STATUS_RENAMED;
+	}
+}
+
 static int compare_pairs(const void *a_, const void *b_)
 {
 	const struct diff_filepair *a = *((const struct diff_filepair **)a_);
@@ -2089,8 +2008,6 @@ static int compare_pairs(const void *a_, const void *b_)
 
 /* Call diffcore_rename() to compute which files have changed on given side */
 static void detect_regular_renames(struct merge_options *opt,
-				   struct tree *merge_base,
-				   struct tree *side,
 				   unsigned side_index)
 {
 	struct diff_options diff_opts;
@@ -2108,11 +2025,13 @@ static void detect_regular_renames(struct merge_options *opt,
 	diff_opts.output_format = DIFF_FORMAT_NO_OUTPUT;
 	diff_setup_done(&diff_opts);
 
+	diff_queued_diff = renames->pairs[side_index];
 	trace2_region_enter("diff", "diffcore_rename", opt->repo);
-	diff_tree_oid(&merge_base->object.oid, &side->object.oid, "",
-		      &diff_opts);
-	diffcore_std(&diff_opts);
+	diffcore_rename_extended(&diff_opts,
+				 &renames->dirs_removed[side_index],
+				 &renames->dir_rename_count[side_index]);
 	trace2_region_leave("diff", "diffcore_rename", opt->repo);
+	resolve_diffpair_statuses(&diff_queued_diff);
 
 	if (diff_opts.needed_rename_limit > renames->needed_limit)
 		renames->needed_limit = diff_opts.needed_rename_limit;
@@ -2212,8 +2131,8 @@ static int detect_and_process_renames(struct merge_options *opt,
 	memset(&combined, 0, sizeof(combined));
 
 	trace2_region_enter("merge", "regular renames", opt->repo);
-	detect_regular_renames(opt, merge_base, side1, MERGE_SIDE1);
-	detect_regular_renames(opt, merge_base, side2, MERGE_SIDE2);
+	detect_regular_renames(opt, MERGE_SIDE1);
+	detect_regular_renames(opt, MERGE_SIDE2);
 	trace2_region_leave("merge", "regular renames", opt->repo);
 
 	trace2_region_enter("merge", "directory renames", opt->repo);
@@ -2651,7 +2570,7 @@ static void process_entry(struct merge_options *opt,
 		 * the directory to remain here, so we need to move this
 		 * path to some new location.
 		 */
-		new_ci = xcalloc(1, sizeof(*new_ci));
+		CALLOC_ARRAY(new_ci, 1);
 		/* We don't really want new_ci->merged.result copied, but it'll
 		 * be overwritten below so it doesn't matter.  We also don't
 		 * want any directory mode/oid values copied, but we'll zero
@@ -3031,7 +2950,7 @@ static int checkout(struct merge_options *opt,
 	unpack_opts.verbose_update = (opt->verbosity > 2);
 	unpack_opts.fn = twoway_merge;
 	if (1/* FIXME: opts->overwrite_ignore*/) {
-		unpack_opts.dir = xcalloc(1, sizeof(*unpack_opts.dir));
+		CALLOC_ARRAY(unpack_opts.dir, 1);
 		unpack_opts.dir->flags |= DIR_SHOW_IGNORED;
 		setup_standard_excludes(unpack_opts.dir);
 	}

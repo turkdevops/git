@@ -1028,7 +1028,7 @@ static int read_convert_config(const char *var, const char *value, void *cb)
 		if (!strncmp(drv->name, name, namelen) && !drv->name[namelen])
 			break;
 	if (!drv) {
-		drv = xcalloc(1, sizeof(struct convert_driver));
+		CALLOC_ARRAY(drv, 1);
 		drv->name = xmemdupz(name, namelen);
 		*user_convert_tail = drv;
 		user_convert_tail = &(drv->next);
@@ -1456,7 +1456,6 @@ void convert_to_git_filter_fd(const struct index_state *istate,
 	convert_attrs(istate, &ca, path);
 
 	assert(ca.drv);
-	assert(ca.drv->clean || ca.drv->process);
 
 	if (!apply_filter(path, NULL, 0, fd, dst, ca.drv, CAP_CLEAN, NULL, NULL))
 		die(_("%s: clean filter '%s' failed"), path, ca.drv->name);

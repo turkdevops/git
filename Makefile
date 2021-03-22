@@ -22,6 +22,9 @@ all::
 # when attempting to read from an fopen'ed directory (or even to fopen
 # it at all).
 #
+# Define OPEN_RETURNS_EINTR if your open() system call may return EINTR
+# when a signal is received (as opposed to restarting).
+#
 # Define NO_OPENSSL environment variable if you do not have OpenSSL.
 #
 # Define USE_LIBPCRE if you have and want to use libpcre. Various
@@ -834,6 +837,7 @@ LIB_OBJS += bundle.o
 LIB_OBJS += cache-tree.o
 LIB_OBJS += chdir-notify.o
 LIB_OBJS += checkout.o
+LIB_OBJS += chunk-format.o
 LIB_OBJS += color.o
 LIB_OBJS += column.o
 LIB_OBJS += combine-diff.o
@@ -863,6 +867,7 @@ LIB_OBJS += diffcore-delta.o
 LIB_OBJS += diffcore-order.o
 LIB_OBJS += diffcore-pickaxe.o
 LIB_OBJS += diffcore-rename.o
+LIB_OBJS += diffcore-rotate.o
 LIB_OBJS += dir-iterator.o
 LIB_OBJS += dir.o
 LIB_OBJS += editor.o
@@ -1536,6 +1541,10 @@ endif
 ifdef FREAD_READS_DIRECTORIES
 	COMPAT_CFLAGS += -DFREAD_READS_DIRECTORIES
 	COMPAT_OBJS += compat/fopen.o
+endif
+ifdef OPEN_RETURNS_EINTR
+	COMPAT_CFLAGS += -DOPEN_RETURNS_EINTR
+	COMPAT_OBJS += compat/open.o
 endif
 ifdef NO_SYMLINK_HEAD
 	BASIC_CFLAGS += -DNO_SYMLINK_HEAD
@@ -3290,11 +3299,11 @@ cover_db_html: cover_db
 # are not necessarily appropriate for general builds, and that vary greatly
 # depending on the compiler version used.
 #
-# An example command to build against libFuzzer from LLVM 4.0.0:
+# An example command to build against libFuzzer from LLVM 11.0.0:
 #
 # make CC=clang CXX=clang++ \
-#      CFLAGS="-fsanitize-coverage=trace-pc-guard -fsanitize=address" \
-#      LIB_FUZZING_ENGINE=/usr/lib/llvm-4.0/lib/libFuzzer.a \
+#      CFLAGS="-fsanitize=fuzzer-no-link,address" \
+#      LIB_FUZZING_ENGINE="-fsanitize=fuzzer" \
 #      fuzz-all
 #
 FUZZ_CXXFLAGS ?= $(CFLAGS)
