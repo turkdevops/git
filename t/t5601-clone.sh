@@ -305,7 +305,8 @@ test_expect_success 'clone from original with relative alternate' '
 test_expect_success 'clone checking out a tag' '
 	git clone --branch=some-tag src dst.tag &&
 	GIT_DIR=src/.git git rev-parse some-tag >expected &&
-	test_cmp expected dst.tag/.git/HEAD &&
+	GIT_DIR=dst.tag/.git git rev-parse HEAD >actual &&
+	test_cmp expected actual &&
 	GIT_DIR=dst.tag/.git git config remote.origin.fetch >fetch.actual &&
 	echo "+refs/heads/*:refs/remotes/origin/*" >fetch.expected &&
 	test_cmp fetch.expected fetch.actual
@@ -757,6 +758,15 @@ start_httpd
 
 test_expect_success 'partial clone using HTTP' '
 	partial_clone "$HTTPD_DOCUMENT_ROOT_PATH/server" "$HTTPD_URL/smart/server"
+'
+
+test_expect_success 'reject cloning shallow repository using HTTP' '
+	test_when_finished "rm -rf repo" &&
+	git clone --bare --no-local --depth=1 src "$HTTPD_DOCUMENT_ROOT_PATH/repo.git" &&
+	test_must_fail git -c protocol.version=2 clone --reject-shallow $HTTPD_URL/smart/repo.git repo 2>err &&
+	test_i18ngrep -e "source repository is shallow, reject to clone." err &&
+
+	git clone --no-reject-shallow $HTTPD_URL/smart/repo.git repo
 '
 
 # DO NOT add non-httpd-specific tests here, because the last part of this

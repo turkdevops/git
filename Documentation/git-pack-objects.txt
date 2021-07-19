@@ -85,6 +85,16 @@ base-name::
 	reference was included in the resulting packfile.  This
 	can be useful to send new tags to native Git clients.
 
+--stdin-packs::
+	Read the basenames of packfiles (e.g., `pack-1234abcd.pack`)
+	from the standard input, instead of object names or revision
+	arguments. The resulting pack contains all objects listed in the
+	included packs (those not beginning with `^`), excluding any
+	objects listed in the excluded packs (beginning with `^`).
++
+Incompatible with `--revs`, or options that imply `--revs` (such as
+`--all`), with the exception of `--unpacked`, which is compatible.
+
 --window=<n>::
 --depth=<n>::
 	These two options affect how the objects contained in
@@ -118,10 +128,10 @@ depth is 4095.
 	into multiple independent packfiles, each not larger than the
 	given size. The size can be suffixed with
 	"k", "m", or "g". The minimum size allowed is limited to 1 MiB.
-	This option
-	prevents the creation of a bitmap index.
 	The default is unlimited, unless the config variable
-	`pack.packSizeLimit` is set.
+	`pack.packSizeLimit` is set. Note that this option may result in
+	a larger and slower repository; see the discussion in
+	`pack.packSizeLimit`.
 
 --honor-pack-keep::
 	This flag causes an object already in a local pack that

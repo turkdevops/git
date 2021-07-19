@@ -52,8 +52,8 @@ char strbuf_slopbuf[1];
 
 void strbuf_init(struct strbuf *sb, size_t hint)
 {
-	sb->alloc = sb->len = 0;
-	sb->buf = strbuf_slopbuf;
+	struct strbuf blank = STRBUF_INIT;
+	memcpy(sb, &blank, sizeof(*sb));
 	if (hint)
 		strbuf_grow(sb, hint);
 }
@@ -209,6 +209,8 @@ void strbuf_list_free(struct strbuf **sbs)
 {
 	struct strbuf **s = sbs;
 
+	if (!s)
+		return;
 	while (*s) {
 		strbuf_release(*s);
 		free(*s++);

@@ -468,8 +468,6 @@ static enum extension_result handle_extension_v0(const char *var,
 			data->precious_objects = git_config_bool(var, value);
 			return EXTENSION_OK;
 		} else if (!strcmp(ext, "partialclone")) {
-			if (!value)
-				return config_error_nonbool(var);
 			data->partial_clone = xstrdup(value);
 			return EXTENSION_OK;
 		} else if (!strcmp(ext, "worktreeconfig")) {
@@ -566,7 +564,6 @@ static int check_repository_format_gently(const char *gitdir, struct repository_
 	}
 
 	repository_format_precious_objects = candidate->precious_objects;
-	set_repository_format_partial_clone(candidate->partial_clone);
 	repository_format_worktree_config = candidate->worktree_config;
 	string_list_clear(&candidate->unknown_extensions, 0);
 	string_list_clear(&candidate->v1_only_extensions, 0);
@@ -666,7 +663,9 @@ int verify_repository_format(const struct repository_format *format,
 	if (format->version >= 1 && format->unknown_extensions.nr) {
 		int i;
 
-		strbuf_addstr(err, _("unknown repository extensions found:"));
+		strbuf_addstr(err, Q_("unknown repository extension found:",
+				      "unknown repository extensions found:",
+				      format->unknown_extensions.nr));
 
 		for (i = 0; i < format->unknown_extensions.nr; i++)
 			strbuf_addf(err, "\n\t%s",
@@ -678,7 +677,9 @@ int verify_repository_format(const struct repository_format *format,
 		int i;
 
 		strbuf_addstr(err,
-			      _("repo version is 0, but v1-only extensions found:"));
+			      Q_("repo version is 0, but v1-only extension found:",
+				 "repo version is 0, but v1-only extensions found:",
+				 format->v1_only_extensions.nr));
 
 		for (i = 0; i < format->v1_only_extensions.nr; i++)
 			strbuf_addf(err, "\n\t%s",
@@ -1193,6 +1194,11 @@ int discover_git_directory(struct strbuf *commondir,
 		return -1;
 	}
 
+	/* take ownership of candidate.partial_clone */
+	the_repository->repository_format_partial_clone =
+		candidate.partial_clone;
+	candidate.partial_clone = NULL;
+
 	clear_repository_format(&candidate);
 	return 0;
 }
@@ -1274,18 +1280,10 @@ const char *setup_git_directory_gently(int *nongit_ok)
 	 * the GIT_PREFIX environment variable must always match. For details
 	 * see Documentation/config/alias.txt.
 	 */
-	if (nongit_ok && *nongit_ok) {
+	if (nongit_ok && *nongit_ok)
 		startup_info->have_repository = 0;
-		startup_info->prefix = NULL;
-		setenv(GIT_PREFIX_ENVIRONMENT, "", 1);
-	} else {
+	else
 		startup_info->have_repository = 1;
-		startup_info->prefix = prefix;
-		if (prefix)
-			setenv(GIT_PREFIX_ENVIRONMENT, prefix, 1);
-		else
-			setenv(GIT_PREFIX_ENVIRONMENT, "", 1);
-	}
 
 	/*
 	 * Not all paths through the setup code will call 'set_git_dir()' (which
@@ -1308,9 +1306,30 @@ const char *setup_git_directory_gently(int *nongit_ok)
 				gitdir = DEFAULT_GIT_DIR_ENVIRONMENT;
 			setup_git_env(gitdir);
 		}
-		if (startup_info->have_repository)
+		if (startup_info->have_repository) {
 			repo_set_hash_algo(the_repository, repo_fmt.hash_algo);
+			/* take ownership of repo_fmt.partial_clone */
+			the_repository->repository_format_partial_clone =
+				repo_fmt.partial_clone;
+			repo_fmt.partial_clone = NULL;
+		}
 	}
+	/*
+	 * Since precompose_string_if_needed() needs to look at
+	 * the core.precomposeunicode configuration, this
+	 * has to happen after the above block that finds
+	 * out where the repository is, i.e. a preparation
+	 * for calling git_config_get_bool().
+	 */
+	if (prefix) {
+		prefix = precompose_string_if_needed(prefix);
+		startup_info->prefix = prefix;
+		setenv(GIT_PREFIX_ENVIRONMENT, prefix, 1);
+	} else {
+		startup_info->prefix = NULL;
+		setenv(GIT_PREFIX_ENVIRONMENT, "", 1);
+	}
+
 
 	strbuf_release(&dir);
 	strbuf_release(&gitdir);
@@ -1378,6 +1397,8 @@ void check_repository_format(struct repository_format *fmt)
 	check_repository_format_gently(get_git_dir(), fmt, NULL);
 	startup_info->have_repository = 1;
 	repo_set_hash_algo(the_repository, fmt->hash_algo);
+	the_repository->repository_format_partial_clone =
+		xstrdup_or_null(fmt->partial_clone);
 	clear_repository_format(&repo_fmt);
 }
 

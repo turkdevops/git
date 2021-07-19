@@ -1977,8 +1977,11 @@ class P4Submit(Command, P4UserMap):
                 newdiff += "+%s\n" % os.readlink(newFile)
             else:
                 f = open(newFile, "r")
-                for line in f.readlines():
-                    newdiff += "+" + line
+                try:
+                    for line in f.readlines():
+                        newdiff += "+" + line
+                except UnicodeDecodeError:
+                    pass # Found non-text data and skip, since diff description should only include text
                 f.close()
 
         return (diff + newdiff).replace('\r\n', '\n')
@@ -3600,19 +3603,18 @@ class P4Sync(Command, P4UserMap):
         return True
 
     def searchParent(self, parent, branch, target):
-        parentFound = False
-        for blob in read_pipe_lines(["git", "rev-list", "--reverse",
+        targetTree = read_pipe(["git", "rev-parse",
+                                "{}^{{tree}}".format(target)]).strip()
+        for line in read_pipe_lines(["git", "rev-list", "--format=%H %T",
                                      "--no-merges", parent]):
-            blob = blob.strip()
-            if len(read_pipe(["git", "diff-tree", blob, target])) == 0:
-                parentFound = True
+            if line.startswith("commit "):
+                continue
+            commit, tree = line.strip().split(" ")
+            if tree == targetTree:
                 if self.verbose:
-                    print("Found parent of %s in commit %s" % (branch, blob))
-                break
-        if parentFound:
-            return blob
-        else:
-            return None
+                    print("Found parent of %s in commit %s" % (branch, commit))
+                return commit
+        return None
 
     def importChanges(self, changes, origin_revision=0):
         cnt = 1

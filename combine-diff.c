@@ -403,11 +403,11 @@ static void consume_hunk(void *state_,
 	state->sline[state->nb-1].p_lno[state->n] = state->ob;
 }
 
-static void consume_line(void *state_, char *line, unsigned long len)
+static int consume_line(void *state_, char *line, unsigned long len)
 {
 	struct combine_diff_state *state = state_;
 	if (!state->lost_bucket)
-		return; /* not in any hunk yet */
+		return 0; /* not in any hunk yet */
 	switch (line[0]) {
 	case '-':
 		append_lost(state->lost_bucket, state->n, line+1, len-1);
@@ -417,6 +417,7 @@ static void consume_line(void *state_, char *line, unsigned long len)
 		state->lno++;
 		break;
 	}
+	return 0;
 }
 
 static void combine_diff(struct repository *r,
@@ -1068,7 +1069,7 @@ static void show_patch_diff(struct combine_diff_path *elem, int num_parent,
 						   &result_size, NULL, NULL);
 		} else if (textconv) {
 			struct diff_filespec *df = alloc_filespec(elem->path);
-			fill_filespec(df, &null_oid, 0, st.st_mode);
+			fill_filespec(df, null_oid(), 0, st.st_mode);
 			result_size = fill_textconv(opt->repo, textconv, df, &result);
 			free_filespec(df);
 		} else if (0 <= (fd = open(elem->path, O_RDONLY))) {

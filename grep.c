@@ -657,6 +657,8 @@ static struct grep_expr *compile_pattern_and(struct grep_pat **list)
 	x = compile_pattern_not(list);
 	p = *list;
 	if (p && p->token == GREP_AND) {
+		if (!x)
+			die("--and not preceded by pattern expression");
 		if (!p->next)
 			die("--and not followed by pattern expression");
 		*list = p->next;
@@ -1494,7 +1496,7 @@ static int fill_textconv_grep(struct repository *r,
 		fill_filespec(df, gs->identifier, 1, 0100644);
 		break;
 	case GREP_SOURCE_FILE:
-		fill_filespec(df, &null_oid, 0, 0100644);
+		fill_filespec(df, null_oid(), 0, 0100644);
 		break;
 	default:
 		BUG("attempt to textconv something without a path?");

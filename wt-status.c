@@ -616,6 +616,7 @@ static void wt_status_collect_changes_worktree(struct wt_status *s)
 	rev.diffopt.rename_score = s->rename_score >= 0 ? s->rename_score : rev.diffopt.rename_score;
 	copy_pathspec(&rev.prune_data, &s->pathspec);
 	run_diff_files(&rev, 0);
+	clear_pathspec(&rev.prune_data);
 }
 
 static void wt_status_collect_changes_index(struct wt_status *s)
@@ -638,7 +639,7 @@ static void wt_status_collect_changes_index(struct wt_status *s)
 		 * mode by passing a command line option we do not ignore any
 		 * changed submodule SHA-1s when comparing index and HEAD, no
 		 * matter what is configured. Otherwise the user won't be
-		 * shown any submodules she manually added (and which are
+		 * shown any submodules manually added (and which are
 		 * staged to be committed), which would be really confusing.
 		 */
 		handle_ignore_submodules_arg(&rev.diffopt, "dirty");
@@ -652,6 +653,8 @@ static void wt_status_collect_changes_index(struct wt_status *s)
 	rev.diffopt.rename_score = s->rename_score >= 0 ? s->rename_score : rev.diffopt.rename_score;
 	copy_pathspec(&rev.prune_data, &s->pathspec);
 	run_diff_index(&rev, 1);
+	object_array_clear(&rev.pending);
+	clear_pathspec(&rev.prune_data);
 }
 
 static void wt_status_collect_changes_initial(struct wt_status *s)
@@ -696,14 +699,13 @@ static void wt_status_collect_changes_initial(struct wt_status *s)
 static void wt_status_collect_untracked(struct wt_status *s)
 {
 	int i;
-	struct dir_struct dir;
+	struct dir_struct dir = DIR_INIT;
 	uint64_t t_begin = getnanotime();
 	struct index_state *istate = s->repo->index;
 
 	if (!s->show_untracked_files)
 		return;
 
-	dir_init(&dir);
 	if (s->show_untracked_files != SHOW_ALL_UNTRACKED_FILES)
 		dir.flags |=
 			DIR_SHOW_OTHER_DIRECTORIES | DIR_HIDE_EMPTY_DIRECTORIES;
@@ -1687,10 +1689,10 @@ void wt_status_get_state(struct repository *r,
 	if (!sequencer_get_last_command(r, &action)) {
 		if (action == REPLAY_PICK) {
 			state->cherry_pick_in_progress = 1;
-			oidcpy(&state->cherry_pick_head_oid, &null_oid);
+			oidcpy(&state->cherry_pick_head_oid, null_oid());
 		} else {
 			state->revert_in_progress = 1;
-			oidcpy(&state->revert_head_oid, &null_oid);
+			oidcpy(&state->revert_head_oid, null_oid());
 		}
 	}
 	if (get_detached_from)
@@ -2480,6 +2482,7 @@ int has_uncommitted_changes(struct repository *r,
 
 	diff_setup_done(&rev_info.diffopt);
 	result = run_diff_index(&rev_info, 1);
+	object_array_clear(&rev_info.pending);
 	return diff_result_code(&rev_info.diffopt, result);
 }
 

@@ -845,6 +845,8 @@ patterns are available:
 
 - `rust` suitable for source code in the Rust language.
 
+- `scheme` suitable for source code in the Scheme language.
+
 - `tex` suitable for source code for LaTeX documents.
 
 
@@ -1245,6 +1247,12 @@ to:
 [attr]binary -diff -merge -text
 ------------
 
+NOTES
+-----
+
+Git does not follow symbolic links when accessing a `.gitattributes`
+file in the working tree. This keeps behavior consistent when the file
+is accessed from the index or a tree versus from the filesystem.
 
 EXAMPLES
 --------

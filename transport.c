@@ -108,11 +108,11 @@ static void set_upstreams(struct transport *transport, struct ref *refs,
 		if (!remotename || !starts_with(remotename, "refs/heads/"))
 			continue;
 
-		if (!pretend)
-			install_branch_config(BRANCH_CONFIG_VERBOSE,
-				localname + 11, transport->remote->name,
-				remotename);
-		else
+		if (!pretend) {
+			int flag = transport->verbose < 0 ? 0 : BRANCH_CONFIG_VERBOSE;
+			install_branch_config(flag, localname + 11,
+				transport->remote->name, remotename);
+		} else if (transport->verbose >= 0)
 			printf(_("Would set upstream of '%s' to '%s' of '%s'\n"),
 				localname + 11, remotename + 11,
 				transport->remote->name);
@@ -147,9 +147,11 @@ static struct ref *get_refs_from_bundle(struct transport *transport,
 	transport->hash_algo = data->header.hash_algo;
 
 	for (i = 0; i < data->header.references.nr; i++) {
-		struct ref_list_entry *e = data->header.references.list + i;
-		struct ref *ref = alloc_ref(e->name);
-		oidcpy(&ref->old_oid, &e->oid);
+		struct string_list_item *e = data->header.references.items + i;
+		const char *name = e->string;
+		struct ref *ref = alloc_ref(name);
+		struct object_id *oid = e->util;
+		oidcpy(&ref->old_oid, oid);
 		ref->next = result;
 		result = ref;
 	}
@@ -175,6 +177,7 @@ static int close_bundle(struct transport *transport)
 	struct bundle_transport_data *data = transport->data;
 	if (data->fd > 0)
 		close(data->fd);
+	bundle_header_release(&data->header);
 	free(data);
 	return 0;
 }
@@ -235,6 +238,9 @@ static int set_git_option(struct git_transport_options *opts,
 	} else if (!strcmp(name, TRANS_OPT_LIST_OBJECTS_FILTER)) {
 		list_objects_filter_die_if_populated(&opts->filter_options);
 		parse_list_objects_filter(&opts->filter_options, value);
+		return 0;
+	} else if (!strcmp(name, TRANS_OPT_REJECT_SHALLOW)) {
+		opts->reject_shallow = !!value;
 		return 0;
 	}
 	return 1;
@@ -370,6 +376,7 @@ static int fetch_refs_via_pack(struct transport *transport,
 	args.stateless_rpc = transport->stateless_rpc;
 	args.server_options = transport->server_options;
 	args.negotiation_tips = data->options.negotiation_tips;
+	args.reject_shallow_remote = transport->smart_options->reject_shallow;
 
 	if (!data->got_remote_heads) {
 		int i;
@@ -388,16 +395,29 @@ static int fetch_refs_via_pack(struct transport *transport,
 	else if (data->version <= protocol_v1)
 		die_if_server_options(transport);
 
+	if (data->options.acked_commits) {
+		if (data->version < protocol_v2) {
+			warning(_("--negotiate-only requires protocol v2"));
+			ret = -1;
+		} else if (!server_supports_feature("fetch", "wait-for-done", 0)) {
+			warning(_("server does not support wait-for-done"));
+			ret = -1;
+		} else {
+			negotiate_using_fetch(data->options.negotiation_tips,
+					      transport->server_options,
+					      transport->stateless_rpc,
+					      data->fd,
+					      data->options.acked_commits);
+			ret = 0;
+		}
+		goto cleanup;
+	}
+
 	refs = fetch_pack(&args, data->fd,
 			  refs_tmp ? refs_tmp : transport->remote_refs,
 			  to_fetch, nr_heads, &data->shallow,
 			  &transport->pack_lockfiles, data->version);
 
-	close(data->fd[0]);
-	close(data->fd[1]);
-	if (finish_connect(data->conn))
-		ret = -1;
-	data->conn = NULL;
 	data->got_remote_heads = 0;
 	data->options.self_contained_and_connected =
 		args.self_contained_and_connected;
@@ -407,6 +427,14 @@ static int fetch_refs_via_pack(struct transport *transport,
 		ret = -1;
 	if (report_unmatched_refs(to_fetch, nr_heads))
 		ret = -1;
+
+cleanup:
+	close(data->fd[0]);
+	if (data->fd[1] >= 0)
+		close(data->fd[1]);
+	if (finish_connect(data->conn))
+		ret = -1;
+	data->conn = NULL;
 
 	free_refs(refs_tmp);
 	free_refs(refs);
@@ -845,7 +873,8 @@ static int disconnect_git(struct transport *transport)
 		if (data->got_remote_heads && !transport->stateless_rpc)
 			packet_flush(data->fd[1]);
 		close(data->fd[0]);
-		close(data->fd[1]);
+		if (data->fd[1] >= 0)
+			close(data->fd[1]);
 		finish_connect(data->conn);
 	}
 
@@ -1026,7 +1055,7 @@ struct transport *transport_get(struct remote *remote, const char *url)
 	struct transport *ret = xcalloc(1, sizeof(*ret));
 
 	ret->progress = isatty(2);
-	string_list_init(&ret->pack_lockfiles, 1);
+	string_list_init_dup(&ret->pack_lockfiles);
 
 	if (!remote)
 		BUG("No remote provided to transport_get()");
@@ -1055,6 +1084,7 @@ struct transport *transport_get(struct remote *remote, const char *url)
 		die(_("git-over-rsync is no longer supported"));
 	} else if (url_is_local_not_ssh(url) && is_file(url) && is_bundle(url, 1)) {
 		struct bundle_transport_data *data = xcalloc(1, sizeof(*data));
+		bundle_header_init(&data->header);
 		transport_check_allowed("file");
 		ret->data = data;
 		ret->vtable = &bundle_vtable;
@@ -1452,6 +1482,8 @@ int transport_disconnect(struct transport *transport)
 	int ret = 0;
 	if (transport->vtable->disconnect)
 		ret = transport->vtable->disconnect(transport);
+	if (transport->got_remote_refs)
+		free_refs((void *)transport->remote_refs);
 	free(transport);
 	return ret;
 }

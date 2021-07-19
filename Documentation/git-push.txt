@@ -244,8 +244,8 @@ Imagine that you have to rebase what you have already published.
 You will have to bypass the "must fast-forward" rule in order to
 replace the history you originally published with the rebased history.
 If somebody else built on top of your original history while you are
-rebasing, the tip of the branch at the remote may advance with her
-commit, and blindly pushing with `--force` will lose her work.
+rebasing, the tip of the branch at the remote may advance with their
+commit, and blindly pushing with `--force` will lose their work.
 +
 This option allows you to say that you expect the history you are
 updating is what you rebased and want to replace. If the remote ref
@@ -600,7 +600,7 @@ EXAMPLES
 
 `git push origin`::
 	Without additional configuration, pushes the current branch to
-	the configured upstream (`remote.origin.merge` configuration
+	the configured upstream (`branch.<name>.merge` configuration
 	variable) if it has the same name as the current branch, and
 	errors out without pushing otherwise.
 +

@@ -1180,20 +1180,6 @@ static void die_bad_number(const char *name, const char *value)
 	}
 }
 
-NORETURN
-static void die_bad_bool(const char *name, const char *value)
-{
-	if (!strcmp(name, "GIT_TEST_GETTEXT_POISON"))
-		/*
-		 * We explicitly *don't* use _() here since it would
-		 * cause an infinite loop with _() needing to call
-		 * use_gettext_poison().
-		 */
-		die("bad boolean config value '%s' for '%s'", value, name);
-	else
-		die(_("bad boolean config value '%s' for '%s'"), value, name);
-}
-
 int git_config_int(const char *name, const char *value)
 {
 	int ret;
@@ -1268,7 +1254,7 @@ int git_config_bool(const char *name, const char *value)
 {
 	int v = git_parse_maybe_bool(value);
 	if (v < 0)
-		die_bad_bool(name, value);
+		die(_("bad boolean config value '%s' for '%s'"), value, name);
 	return v;
 }
 
@@ -1844,12 +1830,27 @@ static int git_config_from_blob_ref(config_fn_t fn,
 	return git_config_from_blob_oid(fn, name, &oid, data);
 }
 
-const char *git_etc_gitconfig(void)
+char *git_system_config(void)
 {
-	static const char *system_wide;
-	if (!system_wide)
-		system_wide = system_path(ETC_GITCONFIG);
-	return system_wide;
+	char *system_config = xstrdup_or_null(getenv("GIT_CONFIG_SYSTEM"));
+	if (!system_config)
+		system_config = system_path(ETC_GITCONFIG);
+	normalize_path_copy(system_config, system_config);
+	return system_config;
+}
+
+void git_global_config(char **user_out, char **xdg_out)
+{
+	char *user_config = xstrdup_or_null(getenv("GIT_CONFIG_GLOBAL"));
+	char *xdg_config = NULL;
+
+	if (!user_config) {
+		user_config = expand_user_path("~/.gitconfig", 0);
+		xdg_config = xdg_config_home("config");
+	}
+
+	*user_out = user_config;
+	*xdg_out = xdg_config;
 }
 
 /*
@@ -1883,8 +1884,9 @@ static int do_git_config_sequence(const struct config_options *opts,
 				  config_fn_t fn, void *data)
 {
 	int ret = 0;
-	char *xdg_config = xdg_config_home("config");
-	char *user_config = expand_user_path("~/.gitconfig", 0);
+	char *system_config = git_system_config();
+	char *xdg_config = NULL;
+	char *user_config = NULL;
 	char *repo_config;
 	enum config_scope prev_parsing_scope = current_parsing_scope;
 
@@ -1896,13 +1898,14 @@ static int do_git_config_sequence(const struct config_options *opts,
 		repo_config = NULL;
 
 	current_parsing_scope = CONFIG_SCOPE_SYSTEM;
-	if (git_config_system() && !access_or_die(git_etc_gitconfig(), R_OK,
-						  opts->system_gently ?
-						  ACCESS_EACCES_OK : 0))
-		ret += git_config_from_file(fn, git_etc_gitconfig(),
-					    data);
+	if (git_config_system() && system_config &&
+	    !access_or_die(system_config, R_OK,
+			   opts->system_gently ? ACCESS_EACCES_OK : 0))
+		ret += git_config_from_file(fn, system_config, data);
 
 	current_parsing_scope = CONFIG_SCOPE_GLOBAL;
+	git_global_config(&user_config, &xdg_config);
+
 	if (xdg_config && !access_or_die(xdg_config, R_OK, ACCESS_EACCES_OK))
 		ret += git_config_from_file(fn, xdg_config, data);
 
@@ -1927,6 +1930,7 @@ static int do_git_config_sequence(const struct config_options *opts,
 		die(_("unable to parse command-line config"));
 
 	current_parsing_scope = prev_parsing_scope;
+	free(system_config);
 	free(xdg_config);
 	free(user_config);
 	free(repo_config);
@@ -2069,7 +2073,7 @@ static int configset_add_value(struct config_set *cs, const char *key, const cha
 		e = xmalloc(sizeof(*e));
 		hashmap_entry_init(&e->ent, strhash(key));
 		e->key = xstrdup(key);
-		string_list_init(&e->value_list, 1);
+		string_list_init_dup(&e->value_list);
 		hashmap_add(&cs->config_hash, &e->ent);
 	}
 	si = string_list_append_nodup(&e->value_list, xstrdup_or_null(value));
@@ -2834,7 +2838,7 @@ static void maybe_remove_section(struct config_store_data *store,
 	begin = store->parsed[i].begin;
 
 	/*
-	 * Next, make sure that we are removing he last key(s) in the section,
+	 * Next, make sure that we are removing the last key(s) in the section,
 	 * and that there are no comments that are possibly about the current
 	 * section.
 	 */
@@ -3048,7 +3052,8 @@ int git_config_set_multivar_in_file_gently(const char *config_filename,
 		if (contents == MAP_FAILED) {
 			if (errno == ENODEV && S_ISDIR(st.st_mode))
 				errno = EISDIR;
-			error_errno(_("unable to mmap '%s'"), config_filename);
+			error_errno(_("unable to mmap '%s'%s"),
+					config_filename, mmap_os_err());
 			ret = CONFIG_INVALID_FILE;
 			contents = NULL;
 			goto out_free;
