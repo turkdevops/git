@@ -399,15 +399,30 @@ Git's tests are run under `LANG=C LC_ALL=C`. So the tests do not need be
 changed to account for translations as they're added.
 
 
+## AI-assisted translation and review
+
+[po/AGENTS.md](AGENTS.md) describes optional workflows for AI coding assistants
+that help with Git localization: updating templates and PO files, translating
+`po/XX.po`, and reviewing translations. Those workflows often use git-po-helper
+together with the gettext tools; see the PO helper section below for what the
+program does and how to build or install it. AI assistants are optional; treat
+their output as a draft and have it reviewed by contributors who know Git and
+the target language well.
+
+When you prompt a coding assistant, mention that file explicitly, for example:
+"Translate po/XX.po with reference to po/AGENTS.md" (replace XX with your
+language code).
+
+
 ## PO helper
 
-To make the maintenance of "XX.po" easier, the l10n coordinator and l10n
-team leaders can use a helper program named "git-po-helper". It is a
-wrapper to gettext suite, specifically written for the purpose of Git
-l10n workflow.
+`git-po-helper` is a helper for Git l10n coordinators and contributors. It
+automates checks that contributions follow project conventions (PO syntax,
+commit messages, which paths may change, and related rules) and can work with
+AI coding agents for tasks such as translating new entries, and reviewing
+translations.
 
-To build and install the helper program from source, see
-[git-po-helper/README][].
+Build and install instructions are in [git-po-helper/README][].
 
 
 ## Conventions
