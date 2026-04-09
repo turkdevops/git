@@ -254,7 +254,10 @@ static struct commit *mapped_commit(kh_oid_map_t *replayed_commits,
 				    struct commit *commit,
 				    struct commit *fallback)
 {
-	khint_t pos = kh_get_oid_map(replayed_commits, commit->object.oid);
+	khint_t pos;
+	if (!commit)
+		return fallback;
+	pos = kh_get_oid_map(replayed_commits, commit->object.oid);
 	if (pos == kh_end(replayed_commits))
 		return fallback;
 	return kh_value(replayed_commits, pos);
@@ -271,18 +274,26 @@ static struct commit *pick_regular_commit(struct repository *repo,
 	struct commit *base, *replayed_base;
 	struct tree *pickme_tree, *base_tree, *replayed_base_tree;
 
-	base = pickme->parents->item;
-	replayed_base = mapped_commit(replayed_commits, base, onto);
+	if (pickme->parents) {
+		base = pickme->parents->item;
+		base_tree = repo_get_commit_tree(repo, base);
+	} else {
+		base = NULL;
+		base_tree = lookup_tree(repo, repo->hash_algo->empty_tree);
+	}
 
+	replayed_base = mapped_commit(replayed_commits, base, onto);
 	replayed_base_tree = repo_get_commit_tree(repo, replayed_base);
 	pickme_tree = repo_get_commit_tree(repo, pickme);
-	base_tree = repo_get_commit_tree(repo, base);
 
 	if (mode == REPLAY_MODE_PICK) {
 		/* Cherry-pick: normal order */
 		merge_opt->branch1 = short_commit_name(repo, replayed_base);
 		merge_opt->branch2 = short_commit_name(repo, pickme);
-		merge_opt->ancestor = xstrfmt("parent of %s", merge_opt->branch2);
+		if (pickme->parents)
+			merge_opt->ancestor = xstrfmt("parent of %s", merge_opt->branch2);
+		else
+			merge_opt->ancestor = xstrdup("empty tree");
 
 		merge_incore_nonrecursive(merge_opt,
 					  base_tree,
@@ -347,13 +358,15 @@ int replay_revisions(struct rev_info *revs,
 	struct commit *last_commit = NULL;
 	struct commit *commit;
 	struct commit *onto = NULL;
-	struct merge_options merge_opt;
+	struct merge_options merge_opt = { 0 };
 	struct merge_result result = {
 		.clean = 1,
 	};
 	bool detached_head;
 	char *advance;
 	char *revert;
+	const char *ref;
+	struct object_id old_oid;
 	enum replay_mode mode = REPLAY_MODE_PICK;
 	int ret;
 
@@ -364,7 +377,26 @@ int replay_revisions(struct rev_info *revs,
 	set_up_replay_mode(revs->repo, &revs->cmdline, opts->onto,
 			   &detached_head, &advance, &revert, &onto, &update_refs);
 
-	/* FIXME: Should allow replaying commits with the first as a root commit */
+	if (opts->ref) {
+		struct object_id oid;
+
+		if (update_refs && strset_get_size(update_refs) > 1) {
+			ret = error(_("'--ref' cannot be used with multiple revision ranges"));
+			goto out;
+		}
+		if (check_refname_format(opts->ref, 0) || !starts_with(opts->ref, "refs/")) {
+			ret = error(_("'%s' is not a valid refname"), opts->ref);
+			goto out;
+		}
+		ref = opts->ref;
+		if (!refs_read_ref(get_main_ref_store(revs->repo), opts->ref, &oid))
+			oidcpy(&old_oid, &oid);
+		else
+			oidclr(&old_oid, revs->repo->hash_algo);
+	} else {
+		ref = advance ? advance : revert;
+		oidcpy(&old_oid, &onto->object.oid);
+	}
 
 	if (prepare_revision_walk(revs) < 0) {
 		ret = error(_("error preparing revisions"));
@@ -380,9 +412,7 @@ int replay_revisions(struct rev_info *revs,
 		khint_t pos;
 		int hr;
 
-		if (!commit->parents)
-			die(_("replaying down from root commit is not supported yet!"));
-		if (commit->parents->next)
+		if (commit->parents && commit->parents->next)
 			die(_("replaying merge commits is not supported yet!"));
 
 		last_commit = pick_regular_commit(revs->repo, commit, replayed_commits,
@@ -399,7 +429,7 @@ int replay_revisions(struct rev_info *revs,
 		kh_value(replayed_commits, pos) = last_commit;
 
 		/* Update any necessary branches */
-		if (advance || revert)
+		if (ref)
 			continue;
 
 		for (decoration = get_name_decoration(&commit->object);
@@ -433,13 +463,9 @@ int replay_revisions(struct rev_info *revs,
 		goto out;
 	}
 
-	/* In --advance or --revert mode, update the target ref */
-	if (advance || revert) {
-		const char *ref = advance ? advance : revert;
-		replay_result_queue_update(out, ref,
-					   &onto->object.oid,
+	if (ref)
+		replay_result_queue_update(out, ref, &old_oid,
 					   &last_commit->object.oid);
-	}
 
 	ret = 0;
 

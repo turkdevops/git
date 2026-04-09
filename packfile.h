@@ -28,6 +28,7 @@ struct packed_git {
 	unsigned pack_local:1,
 		 pack_keep:1,
 		 pack_keep_in_core:1,
+		 pack_keep_in_core_open:1,
 		 freshened:1,
 		 do_not_close:1,
 		 pack_promisor:1,
@@ -266,6 +267,7 @@ int packfile_store_freshen_object(struct packfile_store *store,
 enum kept_pack_type {
 	KEPT_PACK_ON_DISK = (1 << 0),
 	KEPT_PACK_IN_CORE = (1 << 1),
+	KEPT_PACK_IN_CORE_OPEN = (1 << 2),
 };
 
 /*
@@ -352,7 +354,7 @@ typedef int each_packed_object_fn(const struct object_id *oid,
 				  void *data);
 int for_each_object_in_pack(struct packed_git *p,
 			    each_packed_object_fn, void *data,
-			    unsigned flags);
+			    enum odb_for_each_object_flags flags);
 
 /*
  * Iterate through all packed objects in the given packfile store and invoke
@@ -367,7 +369,12 @@ int packfile_store_for_each_object(struct packfile_store *store,
 				   const struct object_info *request,
 				   odb_for_each_object_cb cb,
 				   void *cb_data,
-				   unsigned flags);
+				   const struct odb_for_each_object_options *opts);
+
+int packfile_store_find_abbrev_len(struct packfile_store *store,
+				   const struct object_id *oid,
+				   unsigned min_len,
+				   unsigned *out);
 
 /* A hook to report invalid files in pack directory */
 #define PACKDIR_FILE_PACK 1

@@ -33,6 +33,9 @@
 /* The maximum size for an object header. */
 #define MAX_HEADER_LEN 32
 
+static struct oidtree *odb_source_loose_cache(struct odb_source *source,
+					      const struct object_id *oid);
+
 static int get_conv_flags(unsigned flags)
 {
 	if (flags & INDEX_RENORMALIZE)
@@ -906,7 +909,7 @@ static int start_loose_object_common(struct odb_source *source,
 
 	fd = create_tmpfile(source->odb->repo, tmp_file, filename);
 	if (fd < 0) {
-		if (flags & WRITE_OBJECT_SILENT)
+		if (flags & ODB_WRITE_OBJECT_SILENT)
 			return -1;
 		else if (errno == EACCES)
 			return error(_("insufficient permission for adding "
@@ -1039,7 +1042,7 @@ static int write_loose_object(struct odb_source *source,
 		utb.actime = mtime;
 		utb.modtime = mtime;
 		if (utime(tmp_file.buf, &utb) < 0 &&
-		    !(flags & WRITE_OBJECT_SILENT))
+		    !(flags & ODB_WRITE_OBJECT_SILENT))
 			warning_errno(_("failed utime() on %s"), tmp_file.buf);
 	}
 
@@ -1166,7 +1169,8 @@ cleanup:
 int odb_source_loose_write_object(struct odb_source *source,
 				  const void *buf, unsigned long len,
 				  enum object_type type, struct object_id *oid,
-				  struct object_id *compat_oid_in, unsigned flags)
+				  struct object_id *compat_oid_in,
+				  enum odb_write_object_flags flags)
 {
 	const struct git_hash_algo *algo = source->odb->repo->hash_algo;
 	const struct git_hash_algo *compat = source->odb->repo->compat_hash_algo;
@@ -1279,8 +1283,9 @@ static int index_mem(struct index_state *istate,
 		}
 	}
 	if (flags & INDEX_FORMAT_CHECK) {
-		struct fsck_options opts = FSCK_OPTIONS_DEFAULT;
+		struct fsck_options opts;
 
+		fsck_options_init(&opts, the_repository, FSCK_OPTIONS_DEFAULT);
 		opts.strict = 1;
 		opts.error_func = hash_format_check_report;
 		if (fsck_buffer(null_oid(istate->repo->hash_algo), type, buf, size, &opts))
@@ -1374,7 +1379,7 @@ static int already_written(struct odb_transaction_files *transaction,
 {
 	/* The object may already exist in the repository */
 	if (odb_has_object(transaction->base.source->odb, oid,
-			   HAS_OBJECT_RECHECK_PACKED | HAS_OBJECT_FETCH_PROMISOR))
+			   ODB_HAS_OBJECT_RECHECK_PACKED | ODB_HAS_OBJECT_FETCH_PROMISOR))
 		return 1;
 
 	/* Might want to keep the list sorted */
@@ -1637,6 +1642,34 @@ static int index_blob_packfile_transaction(struct odb_transaction_files *transac
 	return 0;
 }
 
+static int hash_blob_stream(const struct git_hash_algo *hash_algo,
+			    struct object_id *result_oid, int fd, size_t size)
+{
+	unsigned char buf[16384];
+	struct git_hash_ctx ctx;
+	unsigned header_len;
+
+	header_len = format_object_header((char *)buf, sizeof(buf),
+					  OBJ_BLOB, size);
+	hash_algo->init_fn(&ctx);
+	git_hash_update(&ctx, buf, header_len);
+
+	while (size) {
+		size_t rsize = size < sizeof(buf) ? size : sizeof(buf);
+		ssize_t read_result = read_in_full(fd, buf, rsize);
+
+		if ((read_result < 0) || ((size_t)read_result != rsize))
+			return -1;
+
+		git_hash_update(&ctx, buf, rsize);
+		size -= read_result;
+	}
+
+	git_hash_final_oid(result_oid, &ctx);
+
+	return 0;
+}
+
 int index_fd(struct index_state *istate, struct object_id *oid,
 	     int fd, struct stat *st,
 	     enum object_type type, const char *path, unsigned flags)
@@ -1658,18 +1691,23 @@ int index_fd(struct index_state *istate, struct object_id *oid,
 		ret = index_core(istate, oid, fd, xsize_t(st->st_size),
 				 type, path, flags);
 	} else {
-		struct object_database *odb = the_repository->objects;
-		struct odb_transaction_files *files_transaction;
-		struct odb_transaction *transaction;
+		if (flags & INDEX_WRITE_OBJECT) {
+			struct object_database *odb = the_repository->objects;
+			struct odb_transaction_files *files_transaction;
+			struct odb_transaction *transaction;
 
-		transaction = odb_transaction_begin(odb);
-		files_transaction = container_of(odb->transaction,
-						 struct odb_transaction_files,
-						 base);
-		ret = index_blob_packfile_transaction(files_transaction, oid, fd,
-						      xsize_t(st->st_size),
-						      path, flags);
-		odb_transaction_commit(transaction);
+			transaction = odb_transaction_begin(odb);
+			files_transaction = container_of(odb->transaction,
+							 struct odb_transaction_files,
+							 base);
+			ret = index_blob_packfile_transaction(files_transaction, oid, fd,
+							      xsize_t(st->st_size),
+							      path, flags);
+			odb_transaction_commit(transaction);
+		} else {
+			ret = hash_blob_stream(the_repository->hash_algo, oid,
+					       fd, xsize_t(st->st_size));
+		}
 	}
 
 	close(fd);
@@ -1845,11 +1883,28 @@ static int for_each_object_wrapper_cb(const struct object_id *oid,
 	}
 }
 
+static int for_each_prefixed_object_wrapper_cb(const struct object_id *oid,
+					       void *cb_data)
+{
+	struct for_each_object_wrapper_data *data = cb_data;
+	if (data->request) {
+		struct object_info oi = *data->request;
+
+		if (odb_source_loose_read_object_info(data->source,
+						      oid, &oi, 0) < 0)
+			return -1;
+
+		return data->cb(oid, &oi, data->cb_data);
+	} else {
+		return data->cb(oid, NULL, data->cb_data);
+	}
+}
+
 int odb_source_loose_for_each_object(struct odb_source *source,
 				     const struct object_info *request,
 				     odb_for_each_object_cb cb,
 				     void *cb_data,
-				     unsigned flags)
+				     const struct odb_for_each_object_options *opts)
 {
 	struct for_each_object_wrapper_data data = {
 		.source = source,
@@ -1859,10 +1914,15 @@ int odb_source_loose_for_each_object(struct odb_source *source,
 	};
 
 	/* There are no loose promisor objects, so we can return immediately. */
-	if ((flags & ODB_FOR_EACH_OBJECT_PROMISOR_ONLY))
+	if ((opts->flags & ODB_FOR_EACH_OBJECT_PROMISOR_ONLY))
 		return 0;
-	if ((flags & ODB_FOR_EACH_OBJECT_LOCAL_ONLY) && !source->local)
+	if ((opts->flags & ODB_FOR_EACH_OBJECT_LOCAL_ONLY) && !source->local)
 		return 0;
+
+	if (opts->prefix)
+		return oidtree_each(odb_source_loose_cache(source, opts->prefix),
+				    opts->prefix, opts->prefix_hex_len,
+				    for_each_prefixed_object_wrapper_cb, &data);
 
 	return for_each_loose_file_in_source(source, for_each_object_wrapper_cb,
 					     NULL, NULL, &data);
@@ -1914,15 +1974,54 @@ int odb_source_loose_count_objects(struct odb_source *source,
 		*out = count * 256;
 		ret = 0;
 	} else {
+		struct odb_for_each_object_options opts = { 0 };
 		*out = 0;
 		ret = odb_source_loose_for_each_object(source, NULL, count_loose_object,
-						       out, 0);
+						       out, &opts);
 	}
 
 out:
 	if (dir)
 		closedir(dir);
 	free(path);
+	return ret;
+}
+
+struct find_abbrev_len_data {
+	const struct object_id *oid;
+	unsigned len;
+};
+
+static int find_abbrev_len_cb(const struct object_id *oid,
+			      struct object_info *oi UNUSED,
+			      void *cb_data)
+{
+	struct find_abbrev_len_data *data = cb_data;
+	unsigned len = oid_common_prefix_hexlen(oid, data->oid);
+	if (len != hash_algos[oid->algo].hexsz && len >= data->len)
+		data->len = len + 1;
+	return 0;
+}
+
+int odb_source_loose_find_abbrev_len(struct odb_source *source,
+				     const struct object_id *oid,
+				     unsigned min_len,
+				     unsigned *out)
+{
+	struct odb_for_each_object_options opts = {
+		.prefix = oid,
+		.prefix_hex_len = min_len,
+	};
+	struct find_abbrev_len_data data = {
+		.oid = oid,
+		.len = min_len,
+	};
+	int ret;
+
+	ret = odb_source_loose_for_each_object(source, NULL, find_abbrev_len_cb,
+					       &data, &opts);
+	*out = data.len;
+
 	return ret;
 }
 
@@ -1934,8 +2033,8 @@ static int append_loose_object(const struct object_id *oid,
 	return 0;
 }
 
-struct oidtree *odb_source_loose_cache(struct odb_source *source,
-				       const struct object_id *oid)
+static struct oidtree *odb_source_loose_cache(struct odb_source *source,
+					      const struct object_id *oid)
 {
 	struct odb_source_files *files = odb_source_files_downcast(source);
 	int subdir_nr = oid->hash[0];

@@ -136,7 +136,7 @@ static int nr_threads;
 static int from_stdin;
 static int strict;
 static int do_fsck_object;
-static struct fsck_options fsck_options = FSCK_OPTIONS_MISSING_GITMODULES;
+static struct fsck_options fsck_options;
 static int verbose;
 static const char *progress_title;
 static int show_resolving_progress;
@@ -891,7 +891,7 @@ static void sha1_object(const void *data, struct object_entry *obj_entry,
 	if (startup_info->have_repository) {
 		read_lock();
 		collision_test_needed = odb_has_object(the_repository->objects, oid,
-						       HAS_OBJECT_FETCH_PROMISOR);
+						       ODB_HAS_OBJECT_FETCH_PROMISOR);
 		read_unlock();
 	}
 
@@ -1908,6 +1908,8 @@ int cmd_index_pack(int argc,
 	show_usage_if_asked(argc, argv, index_pack_usage);
 
 	disable_replace_refs();
+
+	fsck_options_init(&fsck_options, the_repository, FSCK_OPTIONS_MISSING_GITMODULES);
 	fsck_options.walk = mark_link;
 
 	reset_pack_idx_option(&opts);
