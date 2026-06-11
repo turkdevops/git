@@ -1,4 +1,3 @@
-#define USE_THE_REPOSITORY_VARIABLE
 #define DISABLE_SIGN_COMPARE_WARNINGS
 
 #include "git-compat-util.h"
@@ -2610,7 +2609,7 @@ static int create_default_files(struct repository *repo,
 	}
 	repo_config_set(repo, "core.filemode", filemode ? "true" : "false");
 
-	if (is_bare_repository(the_repository))
+	if (is_bare_repository(repo))
 		repo_config_set(repo, "core.bare", "true");
 	else {
 		repo_config_set(repo, "core.bare", "false");
