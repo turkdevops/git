@@ -229,6 +229,8 @@ int cmd_init_db(int argc,
 
 	if (!is_bare_repository_cfg) {
 		const char *git_dir_parent = strrchr(git_dir, '/');
+		char *git_work_tree_cfg = NULL;
+
 		if (git_dir_parent) {
 			char *rel = xstrndup(git_dir, git_dir_parent - git_dir);
 			git_work_tree_cfg = real_pathdup(rel, 1);
@@ -243,6 +245,8 @@ int cmd_init_db(int argc,
 		if (access(repo_get_work_tree(the_repository), X_OK))
 			die_errno (_("Cannot access work tree '%s'"),
 				   repo_get_work_tree(the_repository));
+
+		free(git_work_tree_cfg);
 	}
 	else {
 		if (real_git_dir)

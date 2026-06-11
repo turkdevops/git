@@ -100,9 +100,6 @@ int auto_comment_line_char;
 bool warn_on_auto_comment_char;
 #endif /* !WITH_BREAKING_CHANGES */
 
-/* This is set by setup_git_directory_gently() and/or git_default_config() */
-char *git_work_tree_cfg;
-
 /*
  * Repository-local GIT_* environment variables; see environment.h for details.
  */

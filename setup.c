@@ -31,6 +31,9 @@ enum allowed_bare_repo {
 	ALLOWED_BARE_REPO_ALL,
 };
 
+/* This is set by setup_git_directory_gently() and/or git_default_config() */
+static char *git_work_tree_cfg;
+
 static struct startup_info the_startup_info;
 struct startup_info *startup_info = &the_startup_info;
 const char *tmp_original_cwd;

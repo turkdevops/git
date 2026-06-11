@@ -149,7 +149,6 @@ int have_git_dir(void);
 
 extern int is_bare_repository_cfg;
 int is_bare_repository(void);
-extern char *git_work_tree_cfg;
 
 /* Environment bits from configuration mechanism */
 extern int trust_executable_bit;
