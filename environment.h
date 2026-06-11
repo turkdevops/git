@@ -125,6 +125,8 @@ int git_default_core_config(const char *var, const char *value,
 
 void repo_config_values_init(struct repo_config_values *cfg);
 
+int is_bare_repository(struct repository *repo);
+
 /*
  * TODO: All the below state either explicitly or implicitly relies on
  * `the_repository`. We should eventually get rid of these and make the
@@ -146,8 +148,6 @@ void repo_config_values_init(struct repo_config_values *cfg);
  * setup_git_directory, or in the environment via $GIT_DIR).
  */
 int have_git_dir(void);
-
-int is_bare_repository(void);
 
 /* Environment bits from configuration mechanism */
 extern int trust_executable_bit;

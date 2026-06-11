@@ -265,7 +265,7 @@ int cmd_repack(int argc,
 
 	if (write_bitmaps < 0) {
 		if (write_midx == REPACK_WRITE_MIDX_NONE &&
-		    (!(pack_everything & ALL_INTO_ONE) || !is_bare_repository()))
+		    (!(pack_everything & ALL_INTO_ONE) || !is_bare_repository(the_repository)))
 			write_bitmaps = 0;
 	}
 	if (po_args.pack_kept_objects < 0)

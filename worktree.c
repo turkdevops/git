@@ -124,7 +124,7 @@ static struct worktree *get_main_worktree(int skip_reading_head)
 	worktree->path = strbuf_detach(&worktree_path, NULL);
 	worktree->is_current = is_current_worktree(worktree);
 	worktree->is_bare = (the_repository->bare_cfg == 1) ||
-		is_bare_repository() ||
+		is_bare_repository(the_repository) ||
 		/*
 		 * When in a secondary worktree we have to also verify if the main
 		 * worktree is bare in $commondir/config.worktree.
