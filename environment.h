@@ -147,7 +147,6 @@ void repo_config_values_init(struct repo_config_values *cfg);
  */
 int have_git_dir(void);
 
-extern int is_bare_repository_cfg;
 int is_bare_repository(void);
 
 /* Environment bits from configuration mechanism */
