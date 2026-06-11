@@ -31,9 +31,6 @@ enum allowed_bare_repo {
 	ALLOWED_BARE_REPO_ALL,
 };
 
-/* This is set by setup_git_directory_gently() and/or git_default_config() */
-static char *git_work_tree_cfg;
-
 static struct startup_info the_startup_info;
 struct startup_info *startup_info = &the_startup_info;
 const char *tmp_original_cwd;
@@ -799,13 +796,10 @@ static int check_repository_format_gently(const char *gitdir,
 	}
 
 	if (!has_common) {
-		if (candidate->is_bare != -1) {
+		if (candidate->is_bare != -1)
 			is_bare_repository_cfg = candidate->is_bare;
-		}
-		if (candidate->work_tree) {
-			free(git_work_tree_cfg);
-			git_work_tree_cfg = xstrdup(candidate->work_tree);
-		}
+	} else {
+		FREE_AND_NULL(candidate->work_tree);
 	}
 
 	return 0;
@@ -1145,7 +1139,7 @@ static const char *setup_explicit_git_dir(struct repository *repo,
 	if (work_tree_env)
 		set_git_work_tree(repo, work_tree_env);
 	else if (is_bare_repository_cfg > 0) {
-		if (git_work_tree_cfg) {
+		if (repo_fmt->work_tree) {
 			/* #22.2, #30 */
 			warning("core.bare and core.worktree do not make sense");
 			repo->worktree_config_is_bogus = true;
@@ -1156,15 +1150,15 @@ static const char *setup_explicit_git_dir(struct repository *repo,
 		free(gitfile);
 		return NULL;
 	}
-	else if (git_work_tree_cfg) { /* #6, #14 */
-		if (is_absolute_path(git_work_tree_cfg))
-			set_git_work_tree(repo, git_work_tree_cfg);
+	else if (repo_fmt->work_tree) { /* #6, #14 */
+		if (is_absolute_path(repo_fmt->work_tree))
+			set_git_work_tree(repo, repo_fmt->work_tree);
 		else {
 			char *core_worktree;
 			if (chdir(gitdirenv))
 				die_errno(_("cannot chdir to '%s'"), gitdirenv);
-			if (chdir(git_work_tree_cfg))
-				die_errno(_("cannot chdir to '%s'"), git_work_tree_cfg);
+			if (chdir(repo_fmt->work_tree))
+				die_errno(_("cannot chdir to '%s'"), repo_fmt->work_tree);
 			core_worktree = xgetcwd();
 			if (chdir(cwd->buf))
 				die_errno(_("cannot come back to cwd"));
@@ -1217,7 +1211,7 @@ static const char *setup_discovered_git_dir(struct repository *repo,
 		return NULL;
 
 	/* --work-tree is set without --git-dir; use discovered one */
-	if (getenv(GIT_WORK_TREE_ENVIRONMENT) || git_work_tree_cfg) {
+	if (getenv(GIT_WORK_TREE_ENVIRONMENT) || repo_fmt->work_tree) {
 		char *to_free = NULL;
 		const char *ret;
 
@@ -1267,7 +1261,7 @@ static const char *setup_bare_git_dir(struct repository *repo,
 	setenv(GIT_IMPLICIT_WORK_TREE_ENVIRONMENT, "0", 1);
 
 	/* --work-tree is set without --git-dir; use discovered one */
-	if (getenv(GIT_WORK_TREE_ENVIRONMENT) || git_work_tree_cfg) {
+	if (getenv(GIT_WORK_TREE_ENVIRONMENT) || repo_fmt->work_tree) {
 		static const char *gitdir;
 
 		gitdir = offset == cwd->len ? "." : xmemdupz(cwd->buf, offset);
