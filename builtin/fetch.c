@@ -171,6 +171,7 @@ static int git_fetch_config(const char *k, const char *v,
 		else
 			die(_("invalid value for '%s': '%s'"),
 			    "fetch.output", v);
+		return 0;
 	}
 
 	return git_default_config(k, v, ctx, cb);
