@@ -476,6 +476,10 @@ While you can also create your own trailer if the situation warrants it, we
 encourage you to instead use one of the common trailers in this project
 highlighted above.
 
+Other projects might regularly refer to other kinds of data, like
+`Fixes:` and `Link:` in the Linux Kernel project, but these ones in
+particular are not used in this project.
+
 Only capitalize the very first letter of the trailer, i.e. favor
 "Signed-off-by" over "Signed-Off-By" and "Acked-by:" over "Acked-By".
 
