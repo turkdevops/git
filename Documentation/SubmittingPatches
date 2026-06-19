@@ -427,6 +427,10 @@ D-C-O.  Indeed you are encouraged to do so.  Do not forget to
 place an in-body "From: " line at the beginning to properly attribute
 the change to its true author (see (2) above).
 
+Place this `Signed-off-by:` trailer at the end, after trailers added by
+others and after other trailers added by you; see
+<<commit-trailers,Commit trailers>> below ("chronological order").
+
 This procedure originally came from the Linux kernel project, so our
 rule is quite similar to theirs, but what exactly it means to sign-off
 your patch differs from project to project, so it may be different
@@ -486,6 +490,12 @@ particular are not used in this project.
 
 Only capitalize the very first letter of the trailer, i.e. favor
 `Signed-off-by:` over `Signed-Off-By:` and `Acked-by:` over `Acked-By:`.
+
+As mentioned under <<dco,DCO>> above, trailers are added in
+chronological order; one person might sign-off on a patch and send it to
+someone else, who then in turn adds her own sign-off. Further, any
+trailers that you add beyond your sign-off should come before that
+sign-off. That makes it clear what trailers which person added.
 
 [[ai]]
 === Use of Artificial Intelligence (AI)
