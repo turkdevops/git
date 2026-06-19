@@ -142,6 +142,13 @@ int is_bare_repository(void)
 	return is_bare_repository_cfg && !repo_get_work_tree(the_repository);
 }
 
+int repo_ignore_case(struct repository *repo)
+{
+	return (repo && repo->initialized) ?
+		repo_config_values(repo)->ignore_case :
+		0;
+}
+
 int have_git_dir(void)
 {
 	return startup_info->have_repository
@@ -720,5 +727,6 @@ void repo_config_values_init(struct repo_config_values *cfg)
 {
 	cfg->attributes_file = NULL;
 	cfg->apply_sparse_checkout = 0;
+	cfg->ignore_case = 0;
 	cfg->branch_track = BRANCH_TRACK_REMOTE;
 }
