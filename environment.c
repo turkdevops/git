@@ -46,7 +46,6 @@ int trust_ctime = 1;
 int check_stat = 1;
 int has_symlinks = 1;
 int minimum_abbrev = 4, default_abbrev = -1;
-int ignore_case;
 int assume_unchanged;
 int is_bare_repository_cfg = -1; /* unspecified */
 int warn_on_object_refname_ambiguity = 1;
@@ -342,7 +341,7 @@ int git_default_core_config(const char *var, const char *value,
 	}
 
 	if (!strcmp(var, "core.ignorecase")) {
-		ignore_case = git_config_bool(var, value);
+		cfg->ignore_case = git_config_bool(var, value);
 		return 0;
 	}
 
