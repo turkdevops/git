@@ -127,8 +127,8 @@ int git_default_core_config(const char *var, const char *value,
 
 /*
  * Getters for the `protect_hfs` and `protect_ntfs` fields of `struct repo_config_values`.
- * They check `repo->gitdir` to prevent calling repo_config_values()
- * before the configuration is loaded or in bare environments.
+ * They check `repo->initialized` to prevent calling `repo_config_values()`
+ * before the repository setup is fully complete or in non-git environments.
  */
 int repo_protect_hfs(struct repository *repo);
 int repo_protect_ntfs(struct repository *repo);

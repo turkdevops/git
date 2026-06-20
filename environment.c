@@ -142,14 +142,14 @@ int is_bare_repository(void)
 
 int repo_protect_ntfs(struct repository *repo)
 {
-	return repo->gitdir ?
+	return (repo && repo->initialized) ?
 		repo_config_values(repo)->protect_ntfs :
 		PROTECT_NTFS_DEFAULT;
 }
 
 int repo_protect_hfs(struct repository *repo)
 {
-	return repo->gitdir ?
+	return (repo && repo->initialized) ?
 		repo_config_values(repo)->protect_hfs :
 		PROTECT_HFS_DEFAULT;
 }
