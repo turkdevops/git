@@ -148,6 +148,7 @@ static int for_each_prefixed_object_in_midx(
 	const struct odb_for_each_object_options *opts,
 	struct odb_source_packed_for_each_object_wrapper_data *data)
 {
+	bool pack_errors = false;
 	int ret;
 
 	for (; m; m = m->base_midx) {
@@ -176,6 +177,20 @@ static int for_each_prefixed_object_in_midx(
 			if (!match_hash(len, opts->prefix->hash, current->hash))
 				break;
 
+			if (opts->flags) {
+				uint32_t pack_id = nth_midxed_pack_int_id(m, i);
+				struct packed_git *pack;
+
+				if (prepare_midx_pack(m, pack_id)) {
+					pack_errors = true;
+					continue;
+				}
+
+				pack = nth_midxed_pack(m, pack_id);
+				if (should_exclude_pack(pack, opts->flags))
+					continue;
+			}
+
 			if (data->request) {
 				struct object_info oi = *data->request;
 
@@ -198,6 +213,8 @@ static int for_each_prefixed_object_in_midx(
 	ret = 0;
 
 out:
+	if (!ret && pack_errors)
+		ret = -1;
 	return ret;
 }
 
@@ -260,9 +277,6 @@ static int odb_source_packed_for_each_prefixed_object(
 	bool pack_errors = false;
 	int ret;
 
-	if (opts->flags)
-		BUG("flags unsupported");
-
 	store->skip_mru_updates = true;
 
 	m = get_multi_pack_index(store);
@@ -274,6 +288,8 @@ static int odb_source_packed_for_each_prefixed_object(
 
 	for (e = packfile_store_get_packs(store); e; e = e->next) {
 		if (e->pack->multi_pack_index)
+			continue;
+		if (should_exclude_pack(e->pack, opts->flags))
 			continue;
 
 		if (open_pack_index(e->pack)) {
