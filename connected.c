@@ -12,6 +12,49 @@
 #include "promisor-remote.h"
 
 /*
+ * For partial clones, we don't want to have to do a regular connectivity check
+ * because we have to enumerate and exclude all promisor objects (slow), and
+ * then the connectivity check itself becomes a no-op because in a partial
+ * clone every object is a promisor object. Instead, just make sure we
+ * received, in a promisor packfile, the objects pointed to by each wanted ref.
+ *
+ * Before checking for promisor packs, be sure we have the latest pack-files
+ * loaded into memory.
+ *
+ * Returns 1 when all object IDs have been found in promisor packs, in which
+ * case we're fully connected and thus done. Returns 0 when we have found
+ * objects in non-promisor packs, in which case we'll have to fall back to the
+ * rev-list-based connectivity checks. Returns a negative error code on error.
+ */
+static int check_connected_promisor(oid_iterate_fn fn,
+				    void *cb_data,
+				    const struct object_id **oid)
+{
+	odb_reprepare(the_repository->objects);
+	do {
+		struct packed_git *p;
+
+		repo_for_each_pack(the_repository, p) {
+			if (!p->pack_promisor)
+				continue;
+			if (find_pack_entry_one(*oid, p))
+				goto promisor_pack_found;
+		}
+
+		/*
+		 * We have found an object that is not part of a promisor pack,
+		 * and thus we cannot skip the full connectivity check.
+		 */
+		return 0;
+
+promisor_pack_found:
+		;
+	} while ((*oid = fn(cb_data)) != NULL);
+
+	return 1;
+}
+
+/*
  * If we feed all the commits we want to verify to this command
  *
  *  $ git rev-list --objects --stdin --not --all
@@ -46,42 +89,16 @@ int check_connected(oid_iterate_fn fn, void *cb_data,
 	}
 
 	if (repo_has_promisor_remote(the_repository)) {
-		/*
-		 * For partial clones, we don't want to have to do a regular
-		 * connectivity check because we have to enumerate and exclude
-		 * all promisor objects (slow), and then the connectivity check
-		 * itself becomes a no-op because in a partial clone every
-		 * object is a promisor object. Instead, just make sure we
-		 * received, in a promisor packfile, the objects pointed to by
-		 * each wanted ref.
-		 *
-		 * Before checking for promisor packs, be sure we have the
-		 * latest pack-files loaded into memory.
-		 */
-		odb_reprepare(the_repository->objects);
-		do {
-			struct packed_git *p;
-
-			repo_for_each_pack(the_repository, p) {
-				if (!p->pack_promisor)
-					continue;
-				if (find_pack_entry_one(oid, p))
-					goto promisor_pack_found;
-			}
-			/*
-			 * Fallback to rev-list with oid and the rest of the
-			 * object IDs provided by fn.
-			 */
-			goto no_promisor_pack_found;
-promisor_pack_found:
-			;
-		} while ((oid = fn(cb_data)) != NULL);
-		if (opt->err_fd)
-			close(opt->err_fd);
-		return 0;
+		err = check_connected_promisor(fn, cb_data, &oid);
+		if (err) {
+			if (opt->err_fd)
+				close(opt->err_fd);
+			if (err > 0)
+				err = 0;
+			return err;
+		}
 	}
 
-no_promisor_pack_found:
 	if (opt->shallow_file) {
 		strvec_push(&rev_list.args, "--shallow-file");
 		strvec_push(&rev_list.args, opt->shallow_file);
