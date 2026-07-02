@@ -27,6 +27,7 @@ static inline void gcrypt_SHA256_Final(unsigned char *digest, gcrypt_SHA256_CTX 
 
 static inline void gcrypt_SHA256_Clone(gcrypt_SHA256_CTX *dst, const gcrypt_SHA256_CTX *src)
 {
+	gcry_md_close(*dst);
 	gcry_md_copy(dst, *src);
 }
 
