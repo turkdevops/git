@@ -283,6 +283,18 @@ void git_hash_final_oid(struct object_id *oid, struct git_hash_ctx *ctx)
 	ctx->algop->final_oid_fn(oid, ctx);
 }
 
+void git_hash_discard(struct git_hash_ctx *ctx)
+{
+	/*
+	 * XXX Many implementations do not need to do anything here,
+	 * and a dummy final() call is wasteful. But we can't fix
+	 * that unless our implementation API exposes a discard
+	 * primitive.
+	 */
+	unsigned char dummy[GIT_MAX_RAWSZ];
+	git_hash_final(dummy, ctx);
+}
+
 uint32_t hash_algo_by_name(const char *name)
 {
 	if (!name)

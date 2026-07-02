@@ -325,6 +325,7 @@ void git_hash_clone(struct git_hash_ctx *dst, const struct git_hash_ctx *src);
 void git_hash_update(struct git_hash_ctx *ctx, const void *in, size_t len);
 void git_hash_final(unsigned char *hash, struct git_hash_ctx *ctx);
 void git_hash_final_oid(struct object_id *oid, struct git_hash_ctx *ctx);
+void git_hash_discard(struct git_hash_ctx *ctx);
 const struct git_hash_algo *hash_algo_ptr_by_number(uint32_t algo);
 struct git_hash_ctx *git_hash_alloc(void);
 void git_hash_free(struct git_hash_ctx *ctx);
