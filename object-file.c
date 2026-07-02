@@ -2122,11 +2122,13 @@ static int check_stream_oid(git_zstream *stream,
 
 	if (status != Z_STREAM_END) {
 		error(_("corrupt loose object '%s'"), oid_to_hex(expected_oid));
+		git_hash_discard(&c);
 		return -1;
 	}
 	if (stream->avail_in) {
 		error(_("garbage at end of loose object '%s'"),
 		      oid_to_hex(expected_oid));
+		git_hash_discard(&c);
 		return -1;
 	}
 
