@@ -39,6 +39,7 @@ struct hashfile_checkpoint {
 void hashfile_checkpoint_init(struct hashfile *, struct hashfile_checkpoint *);
 void hashfile_checkpoint(struct hashfile *, struct hashfile_checkpoint *);
 int hashfile_truncate(struct hashfile *, struct hashfile_checkpoint *);
+void hashfile_checkpoint_release(struct hashfile_checkpoint *);
 
 /* finalize_hashfile flags */
 #define CSUM_CLOSE		1

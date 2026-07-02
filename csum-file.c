@@ -223,6 +223,11 @@ int hashfile_truncate(struct hashfile *f, struct hashfile_checkpoint *checkpoint
 	return 0;
 }
 
+void hashfile_checkpoint_release(struct hashfile_checkpoint *checkpoint)
+{
+	git_hash_discard(&checkpoint->ctx);
+}
+
 void crc32_begin(struct hashfile *f)
 {
 	f->crc32 = crc32(0, NULL, 0);

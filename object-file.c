@@ -1639,6 +1639,8 @@ static int index_blob_packfile_transaction(struct odb_transaction_files *transac
 			   state->alloc_written);
 		state->written[state->nr_written++] = idx;
 	}
+
+	hashfile_checkpoint_release(&checkpoint);
 	return 0;
 }
 
