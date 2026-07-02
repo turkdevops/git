@@ -834,7 +834,7 @@ static int batch_one_object_oi(const struct object_id *oid,
 			       void *_payload)
 {
 	struct for_each_object_payload *payload = _payload;
-	if (oi && oi->whence == OI_PACKED)
+	if (oi && oi->source_infop->source->type == ODB_SOURCE_PACKED)
 		return payload->callback(oid, oi->source_infop->u.packed.pack,
 					 oi->source_infop->u.packed.offset,
 					 payload->payload);
