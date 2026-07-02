@@ -55,11 +55,17 @@ void hashflush(struct hashfile *f)
 	}
 }
 
-void free_hashfile(struct hashfile *f)
+static void free_hashfile_memory(struct hashfile *f)
 {
 	free(f->buffer);
 	free(f->check_buffer);
 	free(f);
+}
+
+void free_hashfile(struct hashfile *f)
+{
+	git_hash_discard(&f->ctx);
+	free_hashfile_memory(f);
 }
 
 int finalize_hashfile(struct hashfile *f, unsigned char *result,
@@ -69,10 +75,12 @@ int finalize_hashfile(struct hashfile *f, unsigned char *result,
 
 	hashflush(f);
 
-	if (f->skip_hash)
+	if (f->skip_hash) {
+		git_hash_discard(&f->ctx);
 		hashclr(f->buffer, f->algop);
-	else
+	} else {
 		git_hash_final(f->buffer, &f->ctx);
+	}
 
 	if (result)
 		hashcpy(result, f->buffer, f->algop);
@@ -97,7 +105,7 @@ int finalize_hashfile(struct hashfile *f, unsigned char *result,
 		if (close(f->check_fd))
 			die_errno("%s: sha1 file error on close", f->name);
 	}
-	free_hashfile(f);
+	free_hashfile_memory(f);
 	return fd;
 }
 
