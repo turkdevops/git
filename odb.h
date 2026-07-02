@@ -249,10 +249,13 @@ int odb_pretend_object(struct object_database *odb,
 		       struct object_id *oid);
 
 /*
- * Object information that can be used to uniquely identify an object and learn
- * more about how exactly it is stored.
+ * Object database source information that can be used to uniquely identify an
+ * object and learn more about how exactly it is stored.
  */
-struct object_info_source {
+struct odb_source_info {
+	/* The source that this object has been looked up from. */
+	struct odb_source *source;
+
 	/*
 	 * Backend-specific information about the specific object. This can be
 	 * used for example to uniquely identify a given object in case it
@@ -307,7 +310,7 @@ struct object_info {
 	 * object lookups in case the same object exists in multiple sources,
 	 * or multiple times in the same source.
 	 */
-	struct object_info_source *sourcep;
+	struct odb_source_info *source_infop;
 
 	/* Response */
 	enum {

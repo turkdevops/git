@@ -235,8 +235,8 @@ static int add_recent_object(const struct object_id *oid,
 	add_pending_object(data->revs, obj, "");
 	if (data->cb) {
 		if (oi->whence == OI_PACKED)
-			data->cb(obj, oi->sourcep->u.packed.pack,
-				 oi->sourcep->u.packed.offset, *oi->mtimep);
+			data->cb(obj, oi->source_infop->u.packed.pack,
+				 oi->source_infop->u.packed.offset, *oi->mtimep);
 		else
 			data->cb(obj, NULL, 0, *oi->mtimep);
 	}
@@ -253,11 +253,11 @@ int add_unseen_recent_objects_to_traversal(struct rev_info *revs,
 	unsigned flags;
 	enum object_type type;
 	time_t mtime;
-	struct object_info_source oi_source;
+	struct odb_source_info source_info;
 	struct object_info oi = {
 		.mtimep = &mtime,
 		.typep = &type,
-		.sourcep = &oi_source,
+		.source_infop = &source_info,
 	};
 	int r;
 

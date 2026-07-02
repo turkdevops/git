@@ -835,8 +835,8 @@ static int batch_one_object_oi(const struct object_id *oid,
 {
 	struct for_each_object_payload *payload = _payload;
 	if (oi && oi->whence == OI_PACKED)
-		return payload->callback(oid, oi->sourcep->u.packed.pack,
-					 oi->sourcep->u.packed.offset,
+		return payload->callback(oid, oi->source_infop->u.packed.pack,
+					 oi->source_infop->u.packed.offset,
 					 payload->payload);
 	return payload->callback(oid, NULL, 0, payload->payload);
 }
@@ -907,9 +907,9 @@ static void batch_each_object(struct batch_options *opt,
 						&payload, flags);
 		}
 	} else {
-		struct object_info_source oi_source;
+		struct odb_source_info source_info;
 		struct object_info oi = {
-			.sourcep = &oi_source,
+			.source_infop = &source_info,
 		};
 
 		for (source = the_repository->objects->sources; source; source = source->next) {

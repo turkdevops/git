@@ -1324,7 +1324,7 @@ static void add_delta_base_cache(struct packed_git *p, off_t base_offset,
 	hashmap_add(&delta_base_cache, &ent->ent);
 }
 
-int packed_object_info_with_index_pos(struct odb_source_packed *source UNUSED,
+int packed_object_info_with_index_pos(struct odb_source_packed *source,
 				      struct packed_git *p, off_t obj_offset,
 				      uint32_t *maybe_index_pos, struct object_info *oi)
 {
@@ -1423,22 +1423,26 @@ int packed_object_info_with_index_pos(struct odb_source_packed *source UNUSED,
 
 	oi->whence = OI_PACKED;
 
-	if (oi->sourcep) {
-		oi->sourcep->u.packed.offset = obj_offset;
-		oi->sourcep->u.packed.pack = p;
+	if (oi->source_infop) {
+		if (!source)
+			BUG("cannot request source without an owning source");
+		oi->source_infop->source = &source->base;
+
+		oi->source_infop->u.packed.offset = obj_offset;
+		oi->source_infop->u.packed.pack = p;
 
 		switch (type) {
 		case OBJ_NONE:
-			oi->sourcep->u.packed.type = PACKED_OBJECT_TYPE_UNKNOWN;
+			oi->source_infop->u.packed.type = PACKED_OBJECT_TYPE_UNKNOWN;
 			break;
 		case OBJ_REF_DELTA:
-			oi->sourcep->u.packed.type = PACKED_OBJECT_TYPE_REF_DELTA;
+			oi->source_infop->u.packed.type = PACKED_OBJECT_TYPE_REF_DELTA;
 			break;
 		case OBJ_OFS_DELTA:
-			oi->sourcep->u.packed.type = PACKED_OBJECT_TYPE_OFS_DELTA;
+			oi->source_infop->u.packed.type = PACKED_OBJECT_TYPE_OFS_DELTA;
 			break;
 		default:
-			oi->sourcep->u.packed.type = PACKED_OBJECT_TYPE_FULL;
+			oi->source_infop->u.packed.type = PACKED_OBJECT_TYPE_FULL;
 			break;
 		}
 	}

@@ -52,6 +52,9 @@ static void populate_object_info(struct odb_source_inmemory *source,
 		*oi->contentp = xmemdupz(object->buf, object->size);
 	if (oi->mtimep)
 		*oi->mtimep = 0;
+	if (oi->source_infop)
+		oi->source_infop->source = &source->base;
+
 	oi->whence = OI_CACHED;
 }
 
