@@ -74,7 +74,6 @@ void free_hashfile(struct hashfile *f);
  * Finalize the hashfile by flushing data to disk and free'ing it.
  */
 int finalize_hashfile(struct hashfile *, unsigned char *, enum fsync_component, unsigned int);
-void discard_hashfile(struct hashfile *);
 void hashwrite(struct hashfile *, const void *, uint32_t);
 void hashflush(struct hashfile *f);
 void crc32_begin(struct hashfile *);
