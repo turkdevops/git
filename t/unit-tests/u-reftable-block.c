@@ -497,3 +497,41 @@ void test_reftable_block__corrupt_log_block_size(void)
 	reftable_block_release(&block);
 	reftable_buf_release(&data);
 }
+
+void test_reftable_block__corrupt_block_size(void)
+{
+	struct reftable_block_source source = { 0 };
+	struct reftable_record rec = {
+		.type = REFTABLE_BLOCK_TYPE_REF,
+		.u.ref = {
+			.value_type = REFTABLE_REF_VAL1,
+			.refname = (char *) "refs/heads/main",
+		},
+	};
+	struct reftable_block block = { 0 };
+	struct reftable_buf data = REFTABLE_BUF_INIT;
+	uint32_t block_size;
+	unsigned char *p;
+
+	cl_reftable_write_block(&data, REFTABLE_BLOCK_TYPE_REF, &rec, 1);
+
+	/*
+	 * The block size is stored as a big-endian 24-bit integer right after
+	 * the one-byte block type at the start of the block. Corrupt it to
+	 * claim a size that is larger than the data we actually have. Reading
+	 * the restart count and restart table relative to such a bogus block
+	 * size must not access out-of-bounds memory.
+	 */
+	p = (unsigned char *) data.buf + 1;
+	block_size = reftable_get_be24(p);
+	cl_assert_equal_i(block_size, 47);
+	reftable_put_be24(p, block_size + 1);
+
+	block_source_from_buf(&source, &data);
+	cl_assert_equal_i(reftable_block_init(&block, &source, 0, 0, data.len,
+					      REFTABLE_HASH_SIZE_SHA1, REFTABLE_BLOCK_TYPE_REF),
+			  REFTABLE_FORMAT_ERROR);
+
+	reftable_block_release(&block);
+	reftable_buf_release(&data);
+}
