@@ -281,6 +281,7 @@ struct git_hash_ctx {
 		git_SHA_CTX_unsafe sha1_unsafe;
 		git_SHA256_CTX sha256;
 	} state;
+	bool active;
 };
 
 typedef void (*git_hash_init_fn)(struct git_hash_ctx *ctx);

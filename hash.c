@@ -285,6 +285,7 @@ void git_hash_free(struct git_hash_ctx *ctx)
 void git_hash_init(struct git_hash_ctx *ctx, const struct git_hash_algo *algop)
 {
 	algop->init_fn(ctx);
+	ctx->active = true;
 }
 
 void git_hash_clone(struct git_hash_ctx *dst, const struct git_hash_ctx *src)
@@ -300,16 +301,21 @@ void git_hash_update(struct git_hash_ctx *ctx, const void *in, size_t len)
 void git_hash_final(unsigned char *hash, struct git_hash_ctx *ctx)
 {
 	ctx->algop->final_fn(hash, ctx);
+	ctx->active = false;
 }
 
 void git_hash_final_oid(struct object_id *oid, struct git_hash_ctx *ctx)
 {
 	ctx->algop->final_oid_fn(oid, ctx);
+	ctx->active = false;
 }
 
 void git_hash_discard(struct git_hash_ctx *ctx)
 {
+	if (!ctx->active)
+		return;
 	ctx->algop->discard_fn(ctx);
+	ctx->active = false;
 }
 
 uint32_t hash_algo_by_name(const char *name)
