@@ -550,7 +550,7 @@ static void create_default_gitdir_config(const char *submodule_name)
 
 	/* Case 2.4: If all the above failed, try a hash of the name as a last resort */
 	header_len = snprintf(header, sizeof(header), "blob %zu", strlen(submodule_name));
-	the_hash_algo->init_fn(&ctx);
+	git_hash_init(&ctx, the_hash_algo);
 	the_hash_algo->update_fn(&ctx, header, header_len);
 	the_hash_algo->update_fn(&ctx, "\0", 1);
 	the_hash_algo->update_fn(&ctx, submodule_name, strlen(submodule_name));

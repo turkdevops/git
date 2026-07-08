@@ -97,7 +97,7 @@ static void write_pack_object(FILE *f, struct git_hash_ctx *pack_ctx,
 	/* Write the data as uncompressed zlib */
 	write_uncompressed_zlib(f, pack_ctx, data, len, algo);
 
-	algo->init_fn(&ctx);
+	git_hash_init(&ctx, algo);
 	object_header_len = format_object_header(object_header,
 						 sizeof(object_header),
 						 type, len);
@@ -430,7 +430,7 @@ static int generate_pack_with_large_object(const char *path, size_t blob_size,
 
 	f = xfopen(path, "wb");
 
-	algo->init_fn(&pack_ctx);
+	git_hash_init(&pack_ctx, algo);
 
 	/* Write pack header */
 	fwrite_or_die(f, &pack_header, sizeof(pack_header));
