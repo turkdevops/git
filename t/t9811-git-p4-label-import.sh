@@ -64,7 +64,9 @@ test_expect_success 'basic p4 labels' '
 		git checkout TAG_F1_ONLY &&
 		! test -f f2 &&
 		git checkout TAG_WITH\$_SHELL_CHAR &&
-		test -f f1 && test -f f2 && test -f file_with_\$metachar &&
+		test -f f1 &&
+		test -f f2 &&
+		test -f file_with_\$metachar &&
 
 		git show TAG_LONG_LABEL | grep -q "A Label second line"
 	)
@@ -231,17 +233,25 @@ test_expect_success 'importing labels with missing revisions' '
 		P4CLIENT=missing-revision &&
 		client_view "//depot/missing-revision/... //missing-revision/..." &&
 		cd "$cli" &&
-		>f1 && p4 add f1 && p4 submit -d "start" &&
+		>f1 &&
+		p4 add f1 &&
+		p4 submit -d "start" &&
 
 		p4 tag -l TAG_S0 ... &&
 
-		>f2 && p4 add f2 && p4 submit -d "second" &&
+		>f2 &&
+		p4 add f2 &&
+		p4 submit -d "second" &&
 
 		startrev=$(p4_head_revision //depot/missing-revision/...) &&
 
-		>f3 && p4 add f3 && p4 submit -d "third" &&
+		>f3 &&
+		p4 add f3 &&
+		p4 submit -d "third" &&
 
-		p4 edit f2 && date >f2 && p4 submit -d "change" f2 &&
+		p4 edit f2 &&
+		date >f2 &&
+		p4 submit -d "change" f2 &&
 
 		endrev=$(p4_head_revision //depot/missing-revision/...) &&
 
