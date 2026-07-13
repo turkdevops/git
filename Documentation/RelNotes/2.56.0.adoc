@@ -27,6 +27,10 @@ UI, Workflows & Features
    absolute and relative paths for "gitdir" and "commondir", supported by
    a new path-formatting helper extracted from "git rev-parse".
 
+ * When 'git push origin/main' or 'git branch origin main' is run, the
+   command is now recognized as a potential typo, and advice has been
+   added to offer a typo fix.
+
 
 Performance, Internal Implementation, Development Support etc.
 --------------------------------------------------------------
@@ -74,6 +78,16 @@ Performance, Internal Implementation, Development Support etc.
    a default limit of at most one reroll per day to give reviewers across
    different time zones enough time to participate.
 
+ * The lazy priority queue optimization pattern (deferring actual removal
+   in 'prio_queue_get()' to allow get+put fusion) has been folded
+   directly into 'prio_queue' itself, speeding up commit traversal
+   workflows and simplifying callers.
+
+ * The 'reprepare()' callback for object database sources has been
+   generalized into a 'prepare()' callback with an optional flush cache
+   flag, and a new 'odb_prepare()' wrapper has been introduced to allow
+   pre-opening object database sources.
+
 
 Fixes since v2.55
 -----------------
@@ -111,3 +125,18 @@ Fixes since v2.55
    test_path_is_missing instead of ! grep on a file that shouldn't
    exist in the conflicted state.
    (merge eaad121fef sg/t3420-do-not-grep-in-missing-file later to maint).
+
+ * The GPG and SSH signature parsing code has been corrected to strip
+   carriage return characters only when they immediately precede line
+   feeds, instead of unconditionally stripping all carriage returns.
+   (merge 5dea8b690b ad/gpg-strip-cr-before-lf later to maint).
+
+ * A memory leak in the 'reftable_writer_new()' initialization function
+   has been fixed by delaying the allocation of 'struct reftable_writer'
+   until after input options are validated.
+   (merge c6fb3b9c3e jk/reftable-leakfix later to maint).
+
+ * A memory leak in the '--base' handling of 'git format-patch' has been
+   plugged, and the leak reporting of the test suite when running under a
+   TAP harness has been improved.
+   (merge 973a0373ff jk/format-patch-leakfix later to maint).
