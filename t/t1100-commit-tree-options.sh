@@ -14,15 +14,14 @@ Also make sure that command line parser understands the normal
 
 . ./test-lib.sh
 
-cat >expected <<EOF
-tree $EMPTY_TREE
-author Author Name <author@email> 1117148400 +0000
-committer Committer Name <committer@email> 1117150200 +0000
-
-comment text
-EOF
-
 test_expect_success 'test preparation: write empty tree' '
+	cat >expected <<-EOF &&
+	tree $EMPTY_TREE
+	author Author Name <author@email> 1117148400 +0000
+	committer Committer Name <committer@email> 1117150200 +0000
+
+	comment text
+	EOF
 	git write-tree >treeid
 '
 
