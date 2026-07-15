@@ -460,8 +460,8 @@ char *pack_bitmap_filename(struct packed_git *p)
 	return xstrfmt("%.*s.bitmap", (int)len, p->pack_name);
 }
 
-static int open_midx_bitmap_1(struct bitmap_index *bitmap_git,
-			      struct multi_pack_index *midx)
+static int open_midx_bitmap(struct bitmap_index *bitmap_git,
+			    struct multi_pack_index *midx)
 {
 	struct stat st;
 	char *bitmap_name = midx_bitmap_filename(midx);
@@ -539,7 +539,7 @@ cleanup:
 	return -1;
 }
 
-static int open_pack_bitmap_1(struct bitmap_index *bitmap_git, struct packed_git *packfile)
+static int open_pack_bitmap(struct bitmap_index *bitmap_git, struct packed_git *packfile)
 {
 	int fd;
 	struct stat st;
@@ -603,7 +603,7 @@ static int load_reverse_index(struct repository *r, struct bitmap_index *bitmap_
 
 		/*
 		 * The multi-pack-index's .rev file is already loaded via
-		 * open_pack_bitmap_1().
+		 * open_pack_bitmap().
 		 *
 		 * But we still need to open the individual pack .rev files,
 		 * since we will need to make use of them in pack-objects.
@@ -687,7 +687,7 @@ static int open_bitmap_for_source(struct odb_source_packed *source,
 	struct packfile_list_entry *e;
 	bool found = false;
 
-	if (midx && !open_midx_bitmap_1(bitmap_git, midx))
+	if (midx && !open_midx_bitmap(bitmap_git, midx))
 		found = true;
 
 	for (e = packfile_store_get_packs(source); e; e = e->next) {
@@ -698,7 +698,7 @@ static int open_bitmap_for_source(struct odb_source_packed *source,
 		if (found && !trace2_is_enabled())
 			break;
 
-		if (!open_pack_bitmap_1(bitmap_git, e->pack))
+		if (!open_pack_bitmap(bitmap_git, e->pack))
 			found = true;
 	}
 
@@ -746,7 +746,7 @@ struct bitmap_index *prepare_midx_bitmap_git(struct multi_pack_index *midx)
 {
 	struct bitmap_index *bitmap_git = xcalloc(1, sizeof(*bitmap_git));
 
-	if (!open_midx_bitmap_1(bitmap_git, midx))
+	if (!open_midx_bitmap(bitmap_git, midx))
 		return bitmap_git;
 
 	free_bitmap_index(bitmap_git);
