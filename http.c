@@ -138,6 +138,7 @@ static unsigned long empty_auth_useless =
 	CURLAUTH_BASIC
 	| CURLAUTH_DIGEST_IE
 	| CURLAUTH_DIGEST;
+static int empty_auth_try_negotiate;
 
 static struct curl_slist *pragma_header;
 static struct string_list extra_http_headers = STRING_LIST_INIT_DUP;
@@ -665,6 +666,22 @@ static void init_curl_http_auth(CURL *result)
 	}
 }
 
+void http_reauth_prepare(int all_capabilities)
+{
+	/*
+	 * If we deferred stripping Negotiate to give empty auth a
+	 * chance (auto mode), skip credential_fill on this retry so
+	 * that init_curl_http_auth() sends empty credentials and
+	 * libcurl can attempt Negotiate with the system ticket cache.
+	 */
+	if (empty_auth_try_negotiate &&
+	    !http_auth.password && !http_auth.credential &&
+	    (http_auth_methods & CURLAUTH_GSSNEGOTIATE))
+		return;
+
+	credential_fill(the_repository, &http_auth, all_capabilities);
+}
+
 /* *var must be free-able */
 static void var_override(char **var, char *value)
 {
@@ -742,6 +759,69 @@ static int has_proxy_cert_password(void)
 		credential_fill(the_repository, &proxy_cert_auth, 0);
 	}
 	return 1;
+}
+
+static const struct socks_proxy_type {
+	const char *name;
+	long curlsym;
+} socks_proxy_types[] = {
+	{ "socks", CURLPROXY_SOCKS4 },
+	{ "socks4", CURLPROXY_SOCKS4 },
+	{ "socks4a", CURLPROXY_SOCKS4A },
+	{ "socks5", CURLPROXY_SOCKS5 },
+	{ "socks5h", CURLPROXY_SOCKS5_HOSTNAME },
+};
+
+static const struct socks_proxy_type *find_socks_proxy_type(const char *protocol)
+{
+	int i;
+
+	if (!protocol)
+		return NULL;
+
+	for (i = 0; i < ARRAY_SIZE(socks_proxy_types); i++) {
+		if (!strcmp(socks_proxy_types[i].name, protocol))
+			return &socks_proxy_types[i];
+	}
+
+	return NULL;
+}
+
+static int is_socks_proxy_protocol(const char *protocol)
+{
+	return !!find_socks_proxy_type(protocol);
+}
+
+static int set_curl_proxy_type(CURL *result, const char *protocol)
+{
+	const struct socks_proxy_type *socks_proxy_type;
+
+	if (!protocol || !strcmp(protocol, "http"))
+		return 0;
+
+	socks_proxy_type = find_socks_proxy_type(protocol);
+	if (socks_proxy_type) {
+		curl_easy_setopt(result, CURLOPT_PROXYTYPE, socks_proxy_type->curlsym);
+		return 0;
+	}
+
+	if (!strcmp(protocol, "https")) {
+		curl_easy_setopt(result, CURLOPT_PROXYTYPE, (long)CURLPROXY_HTTPS);
+
+		if (http_proxy_ssl_cert)
+			curl_easy_setopt(result, CURLOPT_PROXY_SSLCERT,
+					 http_proxy_ssl_cert);
+
+		if (http_proxy_ssl_key)
+			curl_easy_setopt(result, CURLOPT_PROXY_SSLKEY,
+					 http_proxy_ssl_key);
+
+		if (has_proxy_cert_password())
+			curl_easy_setopt(result, CURLOPT_PROXY_KEYPASSWD,
+					 proxy_cert_auth.password);
+	}
+
+	return -1;
 }
 
 /* Return 1 if redactions have been made, 0 otherwise. */
@@ -1214,30 +1294,6 @@ static CURL *get_curl_handle(void)
 	} else if (curl_http_proxy) {
 		struct strbuf proxy = STRBUF_INIT;
 
-		if (starts_with(curl_http_proxy, "socks5h"))
-			curl_easy_setopt(result,
-				CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
-		else if (starts_with(curl_http_proxy, "socks5"))
-			curl_easy_setopt(result,
-				CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5);
-		else if (starts_with(curl_http_proxy, "socks4a"))
-			curl_easy_setopt(result,
-				CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS4A);
-		else if (starts_with(curl_http_proxy, "socks"))
-			curl_easy_setopt(result,
-				CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS4);
-		else if (starts_with(curl_http_proxy, "https")) {
-			curl_easy_setopt(result, CURLOPT_PROXYTYPE, (long)CURLPROXY_HTTPS);
-
-			if (http_proxy_ssl_cert)
-				curl_easy_setopt(result, CURLOPT_PROXY_SSLCERT, http_proxy_ssl_cert);
-
-			if (http_proxy_ssl_key)
-				curl_easy_setopt(result, CURLOPT_PROXY_SSLKEY, http_proxy_ssl_key);
-
-			if (has_proxy_cert_password())
-				curl_easy_setopt(result, CURLOPT_PROXY_KEYPASSWD, proxy_cert_auth.password);
-		}
 		if (strstr(curl_http_proxy, "://"))
 			credential_from_url(&proxy_auth, curl_http_proxy);
 		else {
@@ -1246,6 +1302,10 @@ static CURL *get_curl_handle(void)
 			credential_from_url(&proxy_auth, url.buf);
 			strbuf_release(&url);
 		}
+
+		if (set_curl_proxy_type(result, proxy_auth.protocol) < 0)
+			die("Invalid proxy URL '%s': unsupported proxy scheme '%s'",
+			    curl_http_proxy, proxy_auth.protocol);
 
 		if (!proxy_auth.host)
 			die("Invalid proxy URL '%s'", curl_http_proxy);
@@ -1257,7 +1317,7 @@ static CURL *get_curl_handle(void)
 			if (ver->version_num < 0x075400)
 				die("libcurl 7.84 or later is required to support paths in proxy URLs");
 
-			if (!starts_with(proxy_auth.protocol, "socks"))
+			if (!is_socks_proxy_protocol(proxy_auth.protocol))
 				die("Invalid proxy URL '%s': only SOCKS proxies support paths",
 				    curl_http_proxy);
 
@@ -1890,7 +1950,18 @@ static int handle_curl_result(struct slot_results *results)
 				http_proactive_auth = PROACTIVE_AUTH_NONE;
 			return HTTP_NOAUTH;
 		} else {
-			http_auth_methods &= ~CURLAUTH_GSSNEGOTIATE;
+			if (curl_empty_auth == -1 &&
+			    !empty_auth_try_negotiate &&
+			    (results->auth_avail & CURLAUTH_GSSNEGOTIATE)) {
+				/*
+				 * In auto mode, give Negotiate a chance via
+				 * empty auth before stripping it. If it fails,
+				 * we will strip it on the next 401.
+				 */
+				empty_auth_try_negotiate = 1;
+			} else {
+				http_auth_methods &= ~CURLAUTH_GSSNEGOTIATE;
+			}
 			if (results->auth_avail) {
 				http_auth_methods &= results->auth_avail;
 				http_auth_methods_restricted = 1;
@@ -2398,7 +2469,7 @@ static int http_request_recoverable(const char *url,
 				sleep(retry_delay);
 			}
 		} else if (ret == HTTP_REAUTH) {
-			credential_fill(the_repository, &http_auth, 1);
+			http_reauth_prepare(1);
 		}
 
 		ret = http_request(url, result, target, options);

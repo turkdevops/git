@@ -473,10 +473,10 @@ static struct commit *handle_commit(struct rev_info *revs,
 	die("%s is unknown object", name);
 }
 
-static int everybody_uninteresting(struct commit_list *orig,
+static int everybody_uninteresting(struct prio_queue *orig,
 				   struct commit **interesting_cache)
 {
-	struct commit_list *list = orig;
+	size_t i;
 
 	if (*interesting_cache) {
 		struct commit *commit = *interesting_cache;
@@ -484,9 +484,8 @@ static int everybody_uninteresting(struct commit_list *orig,
 			return 0;
 	}
 
-	while (list) {
-		struct commit *commit = list->item;
-		list = list->next;
+	for (i = 0; i < orig->nr; i++) {
+		struct commit *commit = orig->array[i].data;
 		if (commit->object.flags & UNINTERESTING)
 			continue;
 
@@ -1117,7 +1116,7 @@ static void try_to_simplify_commit(struct rev_info *revs, struct commit *commit)
 }
 
 static int process_parents(struct rev_info *revs, struct commit *commit,
-			   struct commit_list **list, struct prio_queue *queue)
+			   struct prio_queue *queue)
 {
 	struct commit_list *parent = commit->parents;
 	unsigned pass_flags;
@@ -1159,8 +1158,6 @@ static int process_parents(struct rev_info *revs, struct commit *commit,
 			if (p->object.flags & SEEN)
 				continue;
 			p->object.flags |= (SEEN | NOT_USER_GIVEN);
-			if (list)
-				commit_list_insert_by_date(p, list);
 			if (queue)
 				prio_queue_put(queue, p);
 			if (revs->exclude_first_parent_only)
@@ -1208,8 +1205,6 @@ static int process_parents(struct rev_info *revs, struct commit *commit,
 		p->object.flags |= pass_flags | CHILD_VISITED;
 		if (!(p->object.flags & SEEN)) {
 			p->object.flags |= (SEEN | NOT_USER_GIVEN);
-			if (list)
-				commit_list_insert_by_date(p, list);
 			if (queue)
 				prio_queue_put(queue, p);
 		}
@@ -1300,20 +1295,17 @@ static void cherry_pick_list(struct commit_list *list, struct rev_info *revs)
 /* How many extra uninteresting commits we want to see.. */
 #define SLOP 5
 
-static int still_interesting(struct commit_list *src, timestamp_t date, int slop,
+static int still_interesting(struct prio_queue *src, timestamp_t date, int slop,
 			     struct commit **interesting_cache)
 {
 	/*
-	 * No source list at all? We're definitely done..
+	 * Since src is sorted by date, it is enough to peek at the
+	 * first entry to compare dates.  No entry at all means done.
 	 */
-	if (!src)
+	struct commit *commit = prio_queue_peek(src);
+	if (!commit)
 		return 0;
-
-	/*
-	 * Does the destination list contain entries with a date
-	 * before the source list? Definitely _not_ done.
-	 */
-	if (date <= src->item->date)
+	if (date <= commit->date)
 		return SLOP;
 
 	/*
@@ -1451,6 +1443,7 @@ static int limit_list(struct rev_info *revs)
 	struct commit_list *newlist = NULL;
 	struct commit_list **p = &newlist;
 	struct commit *interesting_cache = NULL;
+	struct prio_queue queue = { .compare = compare_commits_by_commit_date };
 
 	if (revs->ancestry_path_implicit_bottoms) {
 		collect_bottom_commits(original_list,
@@ -1461,6 +1454,11 @@ static int limit_list(struct rev_info *revs)
 
 	while (original_list) {
 		struct commit *commit = pop_commit(&original_list);
+		prio_queue_put(&queue, commit);
+	}
+
+	while (queue.nr) {
+		struct commit *commit = prio_queue_get(&queue);
 		struct object *obj = &commit->object;
 
 		if (commit == interesting_cache)
@@ -1468,11 +1466,13 @@ static int limit_list(struct rev_info *revs)
 
 		if (revs->max_age != -1 && (commit->date < revs->max_age))
 			obj->flags |= UNINTERESTING;
-		if (process_parents(revs, commit, &original_list, NULL) < 0)
+		if (process_parents(revs, commit, &queue) < 0) {
+			clear_prio_queue(&queue);
 			return -1;
+		}
 		if (obj->flags & UNINTERESTING) {
 			mark_parents_uninteresting(revs, commit);
-			slop = still_interesting(original_list, date, slop, &interesting_cache);
+			slop = still_interesting(&queue, date, slop, &interesting_cache);
 			if (slop)
 				continue;
 			break;
@@ -1509,7 +1509,7 @@ static int limit_list(struct rev_info *revs)
 		}
 	}
 
-	commit_list_free(original_list);
+	clear_prio_queue(&queue);
 	revs->commits = newlist;
 	return 0;
 }
@@ -2072,7 +2072,7 @@ static int handle_dotdot_1(const char *a_name, const char *b_name,
 		return -1;
 
 	if (!cant_be_filename) {
-		verify_non_filename(revs->prefix, full_name);
+		verify_non_filename(the_repository, revs->prefix, full_name);
 	}
 
 	a_obj = parse_object(revs->repo, &a_oid);
@@ -2225,7 +2225,7 @@ static int handle_revision_arg_1(const char *arg_, struct rev_info *revs, int fl
 		goto out;
 	}
 	if (!cant_be_filename)
-		verify_non_filename(revs->prefix, arg);
+		verify_non_filename(the_repository, revs->prefix, arg);
 	object = get_reference(revs, arg, &oid, flags ^ local_flags);
 	if (!object) {
 		ret = (revs->ignore_missing || revs->do_not_die_on_missing_objects) ? 0 : -1;
@@ -3067,7 +3067,7 @@ int setup_revisions(int argc, const char **argv, struct rev_info *revs, struct s
 			 * but the latter we have checked in the main loop.
 			 */
 			for (j = i; j < argc; j++)
-				verify_filename(revs->prefix, argv[j], j == i);
+				verify_filename(the_repository, revs->prefix, argv[j], j == i);
 
 			strvec_pushv(&prune_data, argv + i);
 			break;
@@ -3253,6 +3253,7 @@ static void free_void_commit_list(void *list)
 void release_revisions(struct rev_info *revs)
 {
 	commit_list_free(revs->commits);
+	clear_prio_queue(&revs->commit_queue);
 	commit_list_free(revs->ancestry_path_bottoms);
 	release_display_notes(&revs->notes_opt);
 	object_array_clear(&revs->pending);
@@ -3722,7 +3723,7 @@ static void explore_walk_step(struct rev_info *revs)
 	if (revs->max_age != -1 && (c->date < revs->max_age))
 		c->object.flags |= UNINTERESTING;
 
-	if (process_parents(revs, c, NULL, NULL) < 0)
+	if (process_parents(revs, c, NULL) < 0)
 		return;
 
 	if (c->object.flags & UNINTERESTING)
@@ -3898,7 +3899,7 @@ static void expand_topo_walk(struct rev_info *revs, struct commit *commit)
 {
 	struct commit_list *p;
 	struct topo_walk_info *info = revs->topo_walk_info;
-	if (process_parents(revs, commit, NULL, NULL) < 0) {
+	if (process_parents(revs, commit, NULL) < 0) {
 		if (!revs->ignore_missing_links)
 			die("Failed to traverse parents of commit %s",
 			    oid_to_hex(&commit->object.oid));
@@ -3933,6 +3934,13 @@ static void expand_topo_walk(struct rev_info *revs, struct commit *commit)
 			return;
 	}
 }
+
+void rev_info_commit_list_to_queue(struct rev_info *revs)
+{
+	while (revs->commits)
+		prio_queue_put(&revs->commit_queue, pop_commit(&revs->commits));
+}
+
 
 int prepare_revision_walk(struct rev_info *revs)
 {
@@ -4002,7 +4010,7 @@ static enum rewrite_result rewrite_one_1(struct rev_info *revs,
 	for (;;) {
 		struct commit *p = *pp;
 		if (!revs->limited)
-			if (process_parents(revs, p, NULL, queue) < 0)
+			if (process_parents(revs, p, queue) < 0)
 				return rewrite_one_error;
 		if (p->object.flags & UNINTERESTING)
 			return rewrite_one_ok;
@@ -4016,27 +4024,18 @@ static enum rewrite_result rewrite_one_1(struct rev_info *revs,
 	}
 }
 
-static void merge_queue_into_list(struct prio_queue *q, struct commit_list **list)
+static void merge_queue_into_prio_queue(struct prio_queue *from,
+					struct prio_queue *to)
 {
-	while (q->nr) {
-		struct commit *item = prio_queue_peek(q);
-		struct commit_list *p = *list;
-
-		if (p && p->item->date >= item->date)
-			list = &p->next;
-		else {
-			p = commit_list_insert(item, list);
-			list = &p->next; /* skip newly added item */
-			prio_queue_get(q); /* pop item */
-		}
-	}
+	while (from->nr)
+		prio_queue_put(to, prio_queue_get(from));
 }
 
 static enum rewrite_result rewrite_one(struct rev_info *revs, struct commit **pp)
 {
 	struct prio_queue queue = { compare_commits_by_commit_date };
 	enum rewrite_result ret = rewrite_one_1(revs, pp, &queue);
-	merge_queue_into_list(&queue, &revs->commits);
+	merge_queue_into_prio_queue(&queue, &revs->commit_queue);
 	clear_prio_queue(&queue);
 	return ret;
 }
@@ -4323,22 +4322,57 @@ static void track_linear(struct rev_info *revs, struct commit *commit)
 	revs->previous_parents = commit_list_copy(commit->parents);
 }
 
+enum rev_walk_mode {
+	REV_WALK_REFLOG,
+	REV_WALK_TOPO,
+	REV_WALK_LIMITED,
+	REV_WALK_NO_WALK,
+	REV_WALK_STREAMING,
+};
+
+static enum rev_walk_mode get_walk_mode(struct rev_info *revs)
+{
+	if (revs->reflog_info)
+		return REV_WALK_REFLOG;
+	if (revs->topo_walk_info)
+		return REV_WALK_TOPO;
+	if (revs->limited)
+		return REV_WALK_LIMITED;
+	if (revs->no_walk)
+		return REV_WALK_NO_WALK;
+	return REV_WALK_STREAMING;
+}
+
 static struct commit *get_revision_1(struct rev_info *revs)
 {
+	enum rev_walk_mode mode = get_walk_mode(revs);
+
+	if (mode == REV_WALK_STREAMING && revs->commits)
+		rev_info_commit_list_to_queue(revs);
+
 	while (1) {
 		struct commit *commit;
 
-		if (revs->reflog_info)
+		switch (mode) {
+		case REV_WALK_REFLOG:
 			commit = next_reflog_entry(revs->reflog_info);
-		else if (revs->topo_walk_info)
+			break;
+		case REV_WALK_TOPO:
 			commit = next_topo_commit(revs);
-		else
+			break;
+		case REV_WALK_LIMITED:
+		case REV_WALK_NO_WALK:
 			commit = pop_commit(&revs->commits);
+			break;
+		case REV_WALK_STREAMING:
+			commit = prio_queue_get(&revs->commit_queue);
+			break;
+		}
 
 		if (!commit)
 			return NULL;
 
-		if (revs->reflog_info)
+		if (mode == REV_WALK_REFLOG)
 			commit->object.flags &= ~(ADDED | SEEN | SHOWN);
 
 		/*
@@ -4346,20 +4380,29 @@ static struct commit *get_revision_1(struct rev_info *revs)
 		 * the parents here. We also need to do the date-based limiting
 		 * that we'd otherwise have done in limit_list().
 		 */
-		if (!revs->limited) {
-			if (revs->max_age != -1 &&
-			    comparison_date(revs, commit) < revs->max_age)
-				continue;
+		if (mode != REV_WALK_LIMITED &&
+		    revs->max_age != -1 &&
+		    comparison_date(revs, commit) < revs->max_age)
+			continue;
 
-			if (revs->reflog_info)
-				try_to_simplify_commit(revs, commit);
-			else if (revs->topo_walk_info)
-				expand_topo_walk(revs, commit);
-			else if (process_parents(revs, commit, &revs->commits, NULL) < 0) {
+		switch (mode) {
+		case REV_WALK_REFLOG:
+			try_to_simplify_commit(revs, commit);
+			break;
+		case REV_WALK_TOPO:
+			expand_topo_walk(revs, commit);
+			break;
+		case REV_WALK_STREAMING:
+			if (process_parents(revs, commit,
+					    &revs->commit_queue) < 0) {
 				if (!revs->ignore_missing_links)
 					die("Failed to traverse parents of commit %s",
-						oid_to_hex(&commit->object.oid));
+					    oid_to_hex(&commit->object.oid));
 			}
+			break;
+		case REV_WALK_NO_WALK:
+		case REV_WALK_LIMITED:
+			break;
 		}
 
 		switch (simplify_commit(revs, commit)) {

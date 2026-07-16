@@ -6,6 +6,7 @@ clar_test_suites = [
   'unit-tests/u-hashmap.c',
   'unit-tests/u-list-objects-filter-options.c',
   'unit-tests/u-mem-pool.c',
+  'unit-tests/u-odb-inmemory.c',
   'unit-tests/u-oid-array.c',
   'unit-tests/u-oidmap.c',
   'unit-tests/u-oidtree.c',
@@ -397,6 +398,7 @@ integration_tests = [
   't3450-history.sh',
   't3451-history-reword.sh',
   't3452-history-split.sh',
+  't3453-history-fixup.sh',
   't3500-cherry.sh',
   't3501-revert-cherry-pick.sh',
   't3502-cherry-pick-merge.sh',
@@ -951,6 +953,7 @@ integration_tests = [
   't7702-repack-cyclic-alternate.sh',
   't7703-repack-geometric.sh',
   't7704-repack-cruft.sh',
+  't7705-repack-incremental-midx.sh',
   't7800-difftool.sh',
   't7810-grep.sh',
   't7811-grep-open.sh',
@@ -1114,6 +1117,7 @@ integration_tests = [
   't9901-git-web--browse.sh',
   't9902-completion.sh',
   't9903-bash-prompt.sh',
+  't9904-url-parse.sh',
 ]
 
 benchmarks = [

@@ -283,13 +283,9 @@ include shared.mak
 # Define SKIP_DASHED_BUILT_INS if you do not need the dashed versions of the
 # built-ins to be linked/copied at all.
 #
-# Define USE_NED_ALLOCATOR if you want to replace the platforms default
-# memory allocators with the nedmalloc allocator written by Niall Douglas.
-#
 # Define OVERRIDE_STRDUP to override the libc version of strdup(3).
 # This is necessary when using a custom allocator in order to avoid
 # crashes due to allocation and free working on different 'heaps'.
-# It's defined automatically if USE_NED_ALLOCATOR is set.
 #
 # Define NO_REGEX if your C library lacks regex support with REG_STARTEND
 # feature.
@@ -498,9 +494,9 @@ include shared.mak
 #
 # == Optional Rust support ==
 #
-# Define WITH_RUST if you want to include features and subsystems written in
-# Rust into Git. For now, Rust is still an optional feature of the build
-# process. With Git 3.0 though, Rust will always be enabled.
+# Define NO_RUST if you want to disable features and subsystems written in Rust
+# from being compiled into Git. For now, Rust is still an optional feature of
+# the build process. With Git 3.0 though, Rust will always be enabled.
 #
 # Building Rust code requires Cargo.
 #
@@ -872,6 +868,7 @@ TEST_BUILTINS_OBJS += test-submodule-config.o
 TEST_BUILTINS_OBJS += test-submodule-nested-repo-config.o
 TEST_BUILTINS_OBJS += test-submodule.o
 TEST_BUILTINS_OBJS += test-subprocess.o
+TEST_BUILTINS_OBJS += test-synthesize.o
 TEST_BUILTINS_OBJS += test-trace2.o
 TEST_BUILTINS_OBJS += test-truncate.o
 TEST_BUILTINS_OBJS += test-userdiff.o
@@ -895,6 +892,7 @@ BUILT_INS += $(patsubst builtin/%.o,git-%$X,$(BUILTIN_OBJS))
 BUILT_INS += git-cherry$X
 BUILT_INS += git-cherry-pick$X
 BUILT_INS += git-format-patch$X
+BUILT_INS += git-format-rev$X
 BUILT_INS += git-fsck-objects$X
 BUILT_INS += git-init$X
 BUILT_INS += git-maintenance$X
@@ -1218,7 +1216,9 @@ LIB_OBJS += object.o
 LIB_OBJS += odb.o
 LIB_OBJS += odb/source.o
 LIB_OBJS += odb/source-files.o
+LIB_OBJS += odb/source-inmemory.o
 LIB_OBJS += odb/streaming.o
+LIB_OBJS += odb/transaction.o
 LIB_OBJS += oid-array.o
 LIB_OBJS += oidmap.o
 LIB_OBJS += oidset.o
@@ -1351,7 +1351,7 @@ LIB_OBJS += urlmatch.o
 LIB_OBJS += usage.o
 LIB_OBJS += userdiff.o
 LIB_OBJS += utf8.o
-ifndef WITH_RUST
+ifdef NO_RUST
 LIB_OBJS += varint.o
 endif
 LIB_OBJS += version.o
@@ -1497,6 +1497,7 @@ BUILTIN_OBJS += builtin/update-ref.o
 BUILTIN_OBJS += builtin/update-server-info.o
 BUILTIN_OBJS += builtin/upload-archive.o
 BUILTIN_OBJS += builtin/upload-pack.o
+BUILTIN_OBJS += builtin/url-parse.o
 BUILTIN_OBJS += builtin/var.o
 BUILTIN_OBJS += builtin/verify-commit.o
 BUILTIN_OBJS += builtin/verify-pack.o
@@ -1511,7 +1512,6 @@ BUILTIN_OBJS += builtin/write-tree.o
 # upstream unnecessarily (making merging in future changes easier).
 THIRD_PARTY_SOURCES += compat/inet_ntop.c
 THIRD_PARTY_SOURCES += compat/inet_pton.c
-THIRD_PARTY_SOURCES += compat/nedmalloc/%
 THIRD_PARTY_SOURCES += compat/obstack.%
 THIRD_PARTY_SOURCES += compat/poll/%
 THIRD_PARTY_SOURCES += compat/regex/%
@@ -1527,6 +1527,7 @@ CLAR_TEST_SUITES += u-hash
 CLAR_TEST_SUITES += u-hashmap
 CLAR_TEST_SUITES += u-list-objects-filter-options
 CLAR_TEST_SUITES += u-mem-pool
+CLAR_TEST_SUITES += u-odb-inmemory
 CLAR_TEST_SUITES += u-oid-array
 CLAR_TEST_SUITES += u-oidmap
 CLAR_TEST_SUITES += u-oidtree
@@ -1590,7 +1591,7 @@ endif
 ALL_CFLAGS = $(DEVELOPER_CFLAGS) $(CPPFLAGS) $(CFLAGS) $(CFLAGS_APPEND)
 ALL_LDFLAGS = $(LDFLAGS) $(LDFLAGS_APPEND)
 
-ifdef WITH_RUST
+ifndef NO_RUST
 BASIC_CFLAGS += -DWITH_RUST
 GITLIBS += $(RUST_LIB)
 ifeq ($(uname_S),Windows)
@@ -2267,12 +2268,6 @@ ifdef NATIVE_CRLF
 	BASIC_CFLAGS += -DNATIVE_CRLF
 endif
 
-ifdef USE_NED_ALLOCATOR
-	COMPAT_CFLAGS += -Icompat/nedmalloc
-	COMPAT_OBJS += compat/nedmalloc/nedmalloc.o
-	OVERRIDE_STRDUP = YesPlease
-endif
-
 ifdef OVERRIDE_STRDUP
 	COMPAT_CFLAGS += -DOVERRIDE_STRDUP
 	COMPAT_OBJS += compat/strdup.o
@@ -2671,7 +2666,7 @@ git$X: git.o GIT-LDFLAGS $(BUILTIN_OBJS) $(GITLIBS)
 
 help.sp help.s help.o: command-list.h
 builtin/bugreport.sp builtin/bugreport.s builtin/bugreport.o: hook-list.h
-builtin/hook.sp builtin/hook.s builtin/hook.o: hook-list.h
+hook.sp hook.s hook.o: hook-list.h
 
 builtin/help.sp builtin/help.s builtin/help.o: config-list.h GIT-PREFIX
 builtin/help.sp builtin/help.s builtin/help.o: EXTRA_CPPFLAGS = \
@@ -2981,12 +2976,6 @@ endif
 ifdef NO_REGEX
 compat/regex/regex.sp compat/regex/regex.o: EXTRA_CPPFLAGS = \
 	-DGAWK -DNO_MBSUPPORT
-endif
-
-ifdef USE_NED_ALLOCATOR
-compat/nedmalloc/nedmalloc.sp compat/nedmalloc/nedmalloc.o: EXTRA_CPPFLAGS = \
-	-DNDEBUG -DREPLACE_SYSTEM_ALLOCATOR
-compat/nedmalloc/nedmalloc.sp: SP_EXTRA_FLAGS += -Wno-non-pointer-null
 endif
 
 headless-git.o: compat/win32/headless.c GIT-CFLAGS

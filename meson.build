@@ -404,7 +404,9 @@ libgit_sources = [
   'odb.c',
   'odb/source.c',
   'odb/source-files.c',
+  'odb/source-inmemory.c',
   'odb/streaming.c',
+  'odb/transaction.c',
   'oid-array.c',
   'oidmap.c',
   'oidset.c',
@@ -563,6 +565,18 @@ libgit_sources += custom_target(
   env: script_environment,
 )
 
+libgit_sources += custom_target(
+  input: 'Documentation/githooks.adoc',
+  output: 'hook-list.h',
+  command: [
+    shell,
+    meson.current_source_dir() + '/tools/generate-hooklist.sh',
+    meson.current_source_dir(),
+    '@OUTPUT@',
+  ],
+  env: script_environment,
+)
+
 builtin_sources = [
   'builtin/add.c',
   'builtin/am.c',
@@ -686,6 +700,7 @@ builtin_sources = [
   'builtin/update-server-info.c',
   'builtin/upload-archive.c',
   'builtin/upload-pack.c',
+  'builtin/url-parse.c',
   'builtin/var.c',
   'builtin/verify-commit.c',
   'builtin/verify-pack.c',
@@ -698,7 +713,6 @@ third_party_excludes = [
   ':!contrib',
   ':!compat/inet_ntop.c',
   ':!compat/inet_pton.c',
-  ':!compat/nedmalloc',
   ':!compat/obstack.*',
   ':!compat/poll',
   ':!compat/regex',
@@ -735,18 +749,6 @@ builtin_sources += custom_target(
     meson.current_source_dir(),
     '@OUTPUT@',
     '@DEPFILE@',
-  ],
-  env: script_environment,
-)
-
-builtin_sources += custom_target(
-  input: 'Documentation/githooks.adoc',
-  output: 'hook-list.h',
-  command: [
-    shell,
-    meson.current_source_dir() + '/tools/generate-hooklist.sh',
-    meson.current_source_dir(),
-    '@OUTPUT@',
   ],
   env: script_environment,
 )
@@ -866,6 +868,12 @@ if get_option('warning_level') in ['2','3', 'everything'] and compiler.get_argum
       libgit_c_args += cflag
     endif
   endforeach
+
+  # Clang generates warnings when compiling glibc 2.43 because of the use of
+  # _Generic.
+  if compiler.get_id() == 'clang'
+    libgit_c_args += '-Wno-c11-extensions'
+  endif
 endif
 
 if get_option('breaking_changes')
@@ -1285,7 +1293,6 @@ elif host_machine.system() == 'windows'
     'compat/win32/pthread.c',
     'compat/win32/syslog.c',
     'compat/win32mmap.c',
-    'compat/nedmalloc/nedmalloc.c',
   ]
 
   libgit_c_args += [
@@ -1744,8 +1751,7 @@ version_def_h = custom_target(
 )
 libgit_sources += version_def_h
 
-cargo = find_program('cargo', dirs: program_path, native: true, required: get_option('rust'))
-rust_option = get_option('rust').disable_auto_if(not cargo.found())
+rust_option = get_option('rust')
 if rust_option.allowed()
   subdir('src')
   libgit_c_args += '-DWITH_RUST'

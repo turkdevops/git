@@ -73,6 +73,31 @@ test_expect_success 'maintenance.auto config option' '
 	test_subcommand ! git maintenance run --auto --quiet --detach <false
 '
 
+test_expect_success 'gc.auto config option' '
+	GIT_TRACE2_EVENT="$(pwd)/default" git commit --quiet --allow-empty -m 1 &&
+	test_subcommand git maintenance run --auto --quiet --detach <default &&
+	GIT_TRACE2_EVENT="$(pwd)/true" \
+		git -c gc.auto=1 commit --quiet --allow-empty -m 2 &&
+	test_subcommand git maintenance run --auto --quiet --detach <true &&
+	GIT_TRACE2_EVENT="$(pwd)/false" \
+		git -c gc.auto=0 commit --quiet --allow-empty -m 3 &&
+	test_subcommand ! git maintenance run --auto --quiet --detach <false
+'
+
+test_expect_success 'maintenance.auto overrides gc.auto' '
+	test_when_finished "rm -f trace" &&
+
+	test_config maintenance.auto false &&
+	test_config gc.auto 1 &&
+	GIT_TRACE2_EVENT="$(pwd)/trace" git commit --quiet --allow-empty -m 1 &&
+	test_subcommand ! git maintenance run --auto --quiet --detach <trace &&
+
+	test_config maintenance.auto true &&
+	test_config gc.auto 0 &&
+	GIT_TRACE2_EVENT="$(pwd)/trace" git commit --quiet --allow-empty -m 1 &&
+	test_subcommand git maintenance run --auto --quiet --detach <trace
+'
+
 for cfg in maintenance.autoDetach gc.autoDetach
 do
 	test_expect_success "$cfg=true config option" '
@@ -101,8 +126,12 @@ test_expect_success "maintenance.autoDetach overrides gc.autoDetach" '
 test_expect_success 'register uses XDG_CONFIG_HOME config if it exists' '
 	test_when_finished rm -r .config/git/config &&
 	(
+		# Override HOME so that .gitconfig (which test-lib.sh may
+		# have created, e.g. to set safe.bareRepository) does not
+		# take precedence over the XDG location.
+		HOME=$PWD/must-not-exist &&
 		XDG_CONFIG_HOME=.config &&
-		export XDG_CONFIG_HOME &&
+		export HOME XDG_CONFIG_HOME &&
 		mkdir -p $XDG_CONFIG_HOME/git &&
 		>$XDG_CONFIG_HOME/git/config &&
 		git maintenance register &&
@@ -124,8 +153,12 @@ test_expect_success 'register does not need XDG_CONFIG_HOME config to exist' '
 test_expect_success 'unregister uses XDG_CONFIG_HOME config if it exists' '
 	test_when_finished rm -r .config/git/config &&
 	(
+		# Override HOME so that .gitconfig (which test-lib.sh may
+		# have created, e.g. to set safe.bareRepository) does not
+		# take precedence over the XDG location.
+		HOME=$PWD/must-not-exist &&
 		XDG_CONFIG_HOME=.config &&
-		export XDG_CONFIG_HOME &&
+		export HOME XDG_CONFIG_HOME &&
 		mkdir -p $XDG_CONFIG_HOME/git &&
 		>$XDG_CONFIG_HOME/git/config &&
 		git maintenance register &&
@@ -532,7 +565,16 @@ run_and_verify_geometric_pack () {
 
 	# And verify that there are no loose objects anymore.
 	git count-objects -v >count &&
-	test_grep '^count: 0$' count
+	test_grep '^count: 0$' count &&
+
+	# Verify that no orphaned .idx files were left behind. On
+	# Windows, a missing odb_to_close causes the parent to hold
+	# mmap handles on .idx files, silently preventing their
+	# deletion by the child git-repack process.
+	ls .git/objects/pack/pack-*.idx .git/objects/pack/pack-*.pack |
+	sed "s/\.pack$/.idx/" |
+	sort | uniq -u >orphaned-idx &&
+	test_must_be_empty orphaned-idx
 }
 
 test_expect_success 'geometric repacking task' '
@@ -580,7 +622,18 @@ test_expect_success 'geometric repacking task' '
 
 		# And these two small packs should now be merged via the
 		# geometric repack. The large packfile should remain intact.
+		cp -R .git/objects .git/objects.save &&
 		run_and_verify_geometric_pack 2 &&
+
+		# On Windows, verify the same with legacy delete semantics
+		# that reject deletion of mmap-held .idx files.
+		if test_have_prereq MINGW
+		then
+			rm -rf .git/objects &&
+			mv .git/objects.save .git/objects &&
+			test_env GIT_TEST_LEGACY_DELETE=1 \
+				run_and_verify_geometric_pack 2
+		fi &&
 
 		# If we now add two more objects and repack twice we should
 		# then see another all-into-one repack. This time around
@@ -1435,6 +1488,64 @@ test_expect_success '--no-detach causes maintenance to not run in background' '
 		GIT_TRACE2_EVENT="$(pwd)/trace.txt" \
 			git maintenance run --no-detach >out 2>&1 &&
 		! test_region maintenance detach trace.txt
+	)
+'
+
+test_expect_success PIPE '--detach holds maintenance lock until daemonized child exits' '
+	test_when_finished "rm -rf repo" &&
+	git init repo &&
+	(
+		cd repo &&
+
+		git config maintenance.auto false &&
+		git config core.lockfilepid true &&
+
+		git remote add origin /does/not/exist &&
+		git config set remote.origin.uploadpack "cat fifo-uploadpack" &&
+
+		mkfifo fifo-uploadpack fifo-maint &&
+
+		# Open the maintenance FIFO, as otherwise spawning
+		# git-maintenance(1) would block. Note that we need to open it
+		# as read-write, as otherwise we would block here already.
+		exec 9<>fifo-maint &&
+
+		{ git maintenance run --task=prefetch --detach 7>&9 & } &&
+		parent="$!" &&
+
+		# Reap the parent process so that the exec call below will not
+		# get SIGCHLD.
+		wait "$parent" &&
+
+		# Open the git-upload-pack(1) FIFO for writing, which will
+		# block until the upload-pack script opens it for reading. Once
+		# exec returns, we know that the daemonized child is alive and
+		# pinned.
+		exec 8>fifo-uploadpack &&
+
+		test_path_is_file .git/objects/maintenance.lock &&
+		test_path_is_file .git/objects/"maintenance~pid.lock" &&
+
+		# Verify that the maintenance.lock still exists, and
+		# that it was created by the parent process, not the
+		# child.
+		echo "pid $parent" >expect &&
+		test_cmp expect .git/objects/"maintenance~pid.lock" &&
+
+		# Reopen the maintenance FIFO as read-only so that
+		# git-maintenance(1) is the only writer. This will cause it to
+		# close the FIFO once the process exits.
+		exec 9<&- &&
+		exec 9<fifo-maint &&
+
+		# Close the FIFO used by git-upload-pack(1) to unblock it and
+		# then wait until the maintenance FIFO is closed by
+		# git-maintenance(1), indicating that it has exited.
+		exec 8>&- &&
+		cat <&9 &&
+
+		test_path_is_missing .git/objects/maintenance.lock &&
+		test_path_is_missing .git/objects/"maintenance~pid.lock"
 	)
 '
 
